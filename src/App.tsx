@@ -5,7 +5,18 @@ import ProjectSelector from "./components/ProjectSelector";
 import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectSettings from "./components/ProjectSettings";
 import SettingsDialog from "./components/SettingsDialog";
-import type { ComposeMode, Message, Conversation, ProjectRow, FileNode, ContentBlock, Turn } from "./types";
+import type {
+  AgentFollowUpAction,
+  ComposeMode,
+  Message,
+  Conversation,
+  ProjectRow,
+  FileNode,
+  ContentBlock,
+  LlmRequestLogEntry,
+  RequestAttachment,
+  Turn,
+} from "./types";
 import {
   listProjects,
   createProject,
@@ -18,6 +29,7 @@ import {
   readTuiSession,
   deleteTuiSession,
   readTuiSessionTurns,
+  readLlmLogs,
   runAgentTask,
   sendMessageViaApi,
 } from "./api";
@@ -36,6 +48,52 @@ function buildSessionPathHint(sessionId: string): string {
   return `~/.deepseek/sessions/${sessionId}.json`;
 }
 
+function buildAgentFollowUpPrompt(turn: Turn, action: AgentFollowUpAction): string {
+  const steps = turn.agent_steps ?? [];
+  const pendingStep = [...steps]
+    .reverse()
+    .find((step) => step.requires_confirmation || step.action_name === "ask_user");
+  const approvalContext =
+    pendingStep?.result_summary ||
+    pendingStep?.summary ||
+    pendingStep?.reason ||
+    turn.final_response ||
+    "上一步存在需要确认的动作。";
+
+  switch (action) {
+    case "approve":
+      return [
+        "用户已经批准上一个 Agent 任务里需要确认的动作。",
+        "请继续执行，不要重复询问同一确认事项。",
+        "",
+        "原始目标：",
+        turn.user_input,
+        "",
+        "需要确认的内容：",
+        approvalContext,
+      ].join("\n");
+    case "reject":
+      return [
+        "用户拒绝执行上一个 Agent 任务里需要确认的动作。",
+        "请停止该高风险动作，并基于原始目标给出更安全的替代方案或当前可交付结果。",
+        "",
+        "原始目标：",
+        turn.user_input,
+        "",
+        "被拒绝的内容：",
+        approvalContext,
+      ].join("\n");
+    case "retry":
+      return [
+        "请重新尝试上一个 Agent 任务。",
+        "如果上一步因为权限判断或暂时性失败而中断，请结合已有上下文重新规划。",
+        "",
+        "原始目标：",
+        turn.user_input,
+      ].join("\n");
+  }
+}
+
 function App() {
   // 项目状态
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -44,6 +102,10 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [knowledgeBasePaths, setKnowledgeBasePaths] = useState("");
+  const [commandAllowlist, setCommandAllowlist] = useState("");
+  const [debugLlmResponses, setDebugLlmResponses] = useState(false);
+  const [llmDebugEntries, setLlmDebugEntries] = useState<LlmRequestLogEntry[]>([]);
 
   // 项目内状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -51,7 +113,16 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [fileNodes, setFileNodes] = useState<FileNode[]>([]);
 
-  // 初始化：加载项目列表 + API key
+  const refreshLlmDebugEntries = useCallback(async () => {
+    try {
+      const entries = await readLlmLogs(20);
+      setLlmDebugEntries(entries);
+    } catch {
+      setLlmDebugEntries([]);
+    }
+  }, []);
+
+  // 初始化：加载项目列表 + 应用设置
   useEffect(() => {
     listProjects()
       .then(setProjects)
@@ -59,7 +130,26 @@ function App() {
     getSetting("api_key").then((val) => {
       if (val) setApiKey(val);
     }).catch(() => {});
-  }, []);
+    getSetting("knowledge_base_paths").then((val) => {
+      if (val) setKnowledgeBasePaths(val);
+    }).catch(() => {});
+    getSetting("command_allowlist").then((val) => {
+      if (val) setCommandAllowlist(val);
+    }).catch(() => {});
+    getSetting("debug_llm_responses").then((val) => {
+      const enabled = val === "true";
+      setDebugLlmResponses(enabled);
+      if (enabled) {
+        void refreshLlmDebugEntries();
+      }
+    }).catch(() => {});
+  }, [refreshLlmDebugEntries]);
+
+  useEffect(() => {
+    if (debugLlmResponses) {
+      void refreshLlmDebugEntries();
+    }
+  }, [debugLlmResponses, refreshLlmDebugEntries]);
 
   const activeConversation = conversations.find((c) => c.id === activeConvId);
 
@@ -212,14 +302,25 @@ function App() {
       pinnedFiles: string,
       skills: string,
       mcpServers: string,
+      retrievalSources: string,
     ) => {
       if (!selectedProject) return;
       try {
-        await updateProject(selectedProject.id, name, description, instructions, model, pinnedFiles, skills, mcpServers);
+        await updateProject(selectedProject.id, name, description, instructions, model, pinnedFiles, skills, mcpServers, retrievalSources);
         // 更新本地状态
         setSelectedProject((prev) =>
           prev
-            ? { ...prev, name, description, instructions, model, pinned_files: pinnedFiles, skills, mcp_servers: mcpServers }
+            ? {
+                ...prev,
+                name,
+                description,
+                instructions,
+                model,
+                pinned_files: pinnedFiles,
+                skills,
+                mcp_servers: mcpServers,
+                retrieval_sources: retrievalSources,
+              }
             : null,
         );
         // 刷新项目列表
@@ -233,15 +334,31 @@ function App() {
 
   // 保存应用设置
   const handleSaveAppSettings = useCallback(
-    async (key: string) => {
+    async (
+      key: string,
+      kbPaths: string,
+      commandEntries: string,
+      debugEnabled: boolean,
+    ) => {
       try {
         await setSetting("api_key", key);
+        await setSetting("knowledge_base_paths", kbPaths);
+        await setSetting("command_allowlist", commandEntries);
+        await setSetting("debug_llm_responses", debugEnabled ? "true" : "false");
         setApiKey(key);
+        setKnowledgeBasePaths(kbPaths);
+        setCommandAllowlist(commandEntries);
+        setDebugLlmResponses(debugEnabled);
+        if (debugEnabled) {
+          await refreshLlmDebugEntries();
+        } else {
+          setLlmDebugEntries([]);
+        }
       } catch (e) {
         console.error("保存 API key 失败:", e);
       }
     },
-    [],
+    [refreshLlmDebugEntries],
   );
 
   // 发送消息
@@ -257,11 +374,18 @@ function App() {
       };
 
       // 乐观更新：追加 pending Turn（保留历史 + 显示加载中）
+      const optimisticIntent = parseOptimisticUserIntent(content);
       const pendingTurn: Turn = {
         id: `${activeConvId}-pending`,
-        user_input: content,
+        user_input: optimisticIntent.user_input,
+        request_attachments: optimisticIntent.request_attachments,
         thinking_steps: [],
         final_response: null, // null → TurnItem 显示加载动画
+        agent_steps: null,
+        agent_goal_status: null,
+        duration_ms: null,
+        error_stage: null,
+        retry_count: null,
       };
 
       setConversations((prev) =>
@@ -293,6 +417,7 @@ function App() {
                 selectedProject.instructions || undefined,
                 selectedProject.skills || undefined,
                 selectedProject.mcp_servers || undefined,
+                selectedProject.retrieval_sources || undefined,
               )).final_response
             : await sendMessageViaApi(
                 activeConvId,
@@ -302,7 +427,12 @@ function App() {
                 selectedProject.instructions || undefined,
                 selectedProject.skills || undefined,
                 selectedProject.mcp_servers || undefined,
+                selectedProject.retrieval_sources || undefined,
               );
+
+        if (debugLlmResponses) {
+          void refreshLlmDebugEntries();
+        }
 
         const assistantMessage: Message = {
           id: crypto.randomUUID(),
@@ -341,6 +471,9 @@ function App() {
             );
           });
       } catch (error) {
+        if (debugLlmResponses) {
+          void refreshLlmDebugEntries();
+        }
         const errorMessage: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -360,6 +493,14 @@ function App() {
       }
     },
     [activeConvId, activeConversation, selectedProject],
+  );
+
+  const handleAgentFollowUp = useCallback(
+    (turn: Turn, action: AgentFollowUpAction) => {
+      const prompt = buildAgentFollowUpPrompt(turn, action);
+      void handleSend(prompt, "agent");
+    },
+    [handleSend],
   );
 
   // 新建对话
@@ -424,6 +565,9 @@ function App() {
         <SettingsDialog
           open={appSettingsOpen}
           apiKey={apiKey}
+          knowledgeBasePaths={knowledgeBasePaths}
+          commandAllowlist={commandAllowlist}
+          debugLlmResponses={debugLlmResponses}
           onClose={() => setAppSettingsOpen(false)}
           onSave={handleSaveAppSettings}
         />
@@ -450,9 +594,12 @@ function App() {
         conversation={activeConversation ?? null}
         isLoading={isLoading}
         onSend={handleSend}
+        onAgentFollowUp={handleAgentFollowUp}
         fileNodes={fileNodes}
         skillNames={skillNamesFromProject}
         mcpNames={mcpNamesFromProject}
+        debugLlmResponsesEnabled={debugLlmResponses}
+        llmDebugEntries={llmDebugEntries}
       />
       <ProjectSettings
         open={settingsOpen}
@@ -466,3 +613,39 @@ function App() {
 }
 
 export default App;
+
+function parseOptimisticUserIntent(content: string): {
+  user_input: string;
+  request_attachments: RequestAttachment[] | null;
+} {
+  const attachments: RequestAttachment[] = [];
+  const lines: string[] = [];
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("本次请求显式附加技能:")) {
+      for (const raw of trimmed.replace("本次请求显式附加技能:", "").split(",")) {
+        const name = raw.trim();
+        if (name) {
+          attachments.push({ kind: "skill", name });
+        }
+      }
+      continue;
+    }
+    if (trimmed.startsWith("本次请求显式附加 MCP:")) {
+      for (const raw of trimmed.replace("本次请求显式附加 MCP:", "").split(",")) {
+        const name = raw.trim();
+        if (name) {
+          attachments.push({ kind: "mcp", name });
+        }
+      }
+      continue;
+    }
+    lines.push(line);
+  }
+
+  return {
+    user_input: lines.join("\n").trim(),
+    request_attachments: attachments.length > 0 ? attachments : null,
+  };
+}

@@ -1,0 +1,188 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1780120898623,
+  "projectRoot": "/Users/Gress/code/ai/deepseekX",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "5.4.0",
+        "category": "build"
+      },
+      {
+        "name": "vitest",
+        "version": "4.1.7",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": "npm test",
+    "lintCommand": null,
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "vite",
+      "build": "tsc && vite build",
+      "test": "vitest run",
+      "preview": "vite preview",
+      "tauri": "tauri"
+    }
+  },
+  "conventions": {
+    "namingStyle": "camelCase",
+    "importStyle": "ES modules",
+    "testPattern": null,
+    "fileOrganization": "type-based"
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts",
+      "src"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1780120898607,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1780120898607,
+      "keyFiles": [
+        "skill-mcp-proposal.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 8,
+      "lastAccessed": 1780120898618,
+      "keyFiles": [
+        "check_sessions.py",
+        "click.sh",
+        "computer_use.sh",
+        "screenshot.sh",
+        "test_parse_blocks.py"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 6,
+      "lastAccessed": 1780120898618,
+      "keyFiles": [
+        "App.tsx",
+        "api.ts",
+        "index.css",
+        "main.tsx",
+        "types.ts"
+      ]
+    },
+    "src-tauri": {
+      "path": "src-tauri",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1780120898618,
+      "keyFiles": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "build.rs",
+        "tauri.conf.json"
+      ]
+    },
+    "temp": {
+      "path": "temp",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1780120898619,
+      "keyFiles": []
+    },
+    "dist/assets": {
+      "path": "dist/assets",
+      "purpose": "Static assets",
+      "fileCount": 3,
+      "lastAccessed": 1780120898620,
+      "keyFiles": [
+        "index-BXnPrQQj.css",
+        "index-BpyU-pQm.js",
+        "index-C-b_Qtcb.js"
+      ]
+    },
+    "src/components": {
+      "path": "src/components",
+      "purpose": "UI components",
+      "fileCount": 13,
+      "lastAccessed": 1780120898621,
+      "keyFiles": [
+        "ChatInput.tsx",
+        "ChatPanel.tsx",
+        "CreateProjectDialog.tsx"
+      ]
+    },
+    "src/test": {
+      "path": "src/test",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1780120898622,
+      "keyFiles": [
+        "setup.ts"
+      ]
+    },
+    "src-tauri/src": {
+      "path": "src-tauri/src",
+      "purpose": "Source code",
+      "fileCount": 5,
+      "lastAccessed": 1780120898623,
+      "keyFiles": [
+        "api.rs",
+        "db.rs",
+        "lib.rs"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

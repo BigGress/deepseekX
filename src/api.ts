@@ -9,6 +9,7 @@ import type {
   SessionMessages,
   TurnBasedSession,
   SkillInfo,
+  LlmRequestLogEntry,
 } from "./types";
 
 // ---------- Project ----------
@@ -20,6 +21,7 @@ export async function createProject(
   instructions: string,
   model: string,
   pinnedFiles?: string,
+  retrievalSources?: string,
 ): Promise<ProjectRow> {
   return invoke("create_project", {
     name,
@@ -28,6 +30,7 @@ export async function createProject(
     instructions,
     model,
     pinnedFiles,
+    retrievalSources,
   });
 }
 
@@ -48,8 +51,9 @@ export async function updateProject(
   pinnedFiles?: string,
   skills?: string,
   mcpServers?: string,
+  retrievalSources?: string,
 ): Promise<void> {
-  return invoke("update_project", { id, name, description, instructions, model, pinnedFiles, skills, mcpServers });
+  return invoke("update_project", { id, name, description, instructions, model, pinnedFiles, skills, mcpServers, retrievalSources });
 }
 
 export async function deleteProject(id: string): Promise<void> {
@@ -147,6 +151,7 @@ export async function sendMessageViaApi(
   instructions?: string,
   skills?: string,
   mcpServers?: string,
+  retrievalSources?: string,
 ): Promise<string> {
   return invoke("send_message_via_api", {
     sessionId,
@@ -156,6 +161,7 @@ export async function sendMessageViaApi(
     instructions: instructions ?? null,
     skills: skills ?? null,
     mcpServers: mcpServers ?? null,
+    retrievalSources: retrievalSources ?? null,
   });
 }
 
@@ -167,6 +173,7 @@ export async function runAgentTask(
   instructions?: string,
   skills?: string,
   mcpServers?: string,
+  retrievalSources?: string,
 ): Promise<AgentRunResponse> {
   return invoke("run_agent_task", {
     sessionId,
@@ -176,6 +183,7 @@ export async function runAgentTask(
     instructions: instructions ?? null,
     skills: skills ?? null,
     mcpServers: mcpServers ?? null,
+    retrievalSources: retrievalSources ?? null,
   });
 }
 
@@ -187,4 +195,8 @@ export async function listAvailableSkills(): Promise<SkillInfo[]> {
 
 export async function listAvailableMcpServers(): Promise<string[]> {
   return invoke("list_available_mcp_servers");
+}
+
+export async function readLlmLogs(limit = 20): Promise<LlmRequestLogEntry[]> {
+  return invoke("read_llm_logs", { limit });
 }

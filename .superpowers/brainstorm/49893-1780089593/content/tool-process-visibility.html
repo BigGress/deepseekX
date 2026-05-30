@@ -1,0 +1,107 @@
+<h2>结果展示优化草图</h2>
+<p class="subtitle">目标：主结果只保留用户真正关心的答案，tool 调用与过程内容默认折叠，不再抢占主视线</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">当前状态</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">Primary Result</div>
+        <div class="placeholder" style="padding:16px; line-height:1.7;">
+          最终答案<br />
+          验证说明<br />
+          有时还会混入过程性摘要
+        </div>
+      </div>
+      <div class="section">
+        <div class="label">Execution Detail</div>
+        <div class="placeholder" style="padding:16px; line-height:1.6;">
+          默认可见或视觉权重过高<br />
+          retrieve_context / summarize_findings / tool_result<br />
+          容易和最终答案竞争注意力
+        </div>
+      </div>
+      <div class="section">
+        <div class="label">典型问题</div>
+        <div class="pros-cons">
+          <div class="cons">
+            <h4>问题</h4>
+            <ul>
+              <li>过程内容重复展示</li>
+              <li>工具结果信息密度太高</li>
+              <li>用户很难一眼抓到最终结论</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">推荐状态</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">Primary Result</div>
+        <div class="placeholder" style="padding:16px; line-height:1.7;">
+          最终答案<br />
+          简短验证<br />
+          可选下一步<br />
+          <strong>不直接展示 tool 过程</strong>
+        </div>
+      </div>
+      <div class="section">
+        <div class="label">Execution Detail</div>
+        <div class="placeholder" style="padding:16px; line-height:1.6;">
+          默认折叠<br />
+          标题弱化为“查看执行过程”<br />
+          仅在用户展开时展示细节
+        </div>
+      </div>
+      <div class="section">
+        <div class="label">状态例外</div>
+        <div class="pros-cons">
+          <div class="pros">
+            <h4>自动展开</h4>
+            <ul>
+              <li>blocked</li>
+              <li>failed</li>
+              <li>needs_confirmation</li>
+            </ul>
+          </div>
+          <div class="cons">
+            <h4>保持折叠</h4>
+            <ul>
+              <li>done</li>
+              <li>纯调研结果</li>
+              <li>普通成功执行</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>你这次 `fafdfb74-c9c8-4313-8881-0a9df8c5c723` 暴露出来的问题</h3>
+  <div class="cards">
+    <div class="card" data-choice="a" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>A. 主结果优先级不够硬</h3>
+        <p>`finish.summary` 已经足够交付，但过程步骤仍持续占屏。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="b" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>B. summarize_findings 结果过重</h3>
+        <p>整理结果里还混入 retrieval 明细，导致和执行区重复。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="c" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>C. 过程区默认展开策略不够克制</h3>
+        <p>成功态下也容易把工具过程带出来，影响阅读效率。</p>
+      </div>
+    </div>
+  </div>
+</div>

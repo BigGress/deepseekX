@@ -1,5 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import type { ComposeMode, FileNode } from "../types";
+import type {
+  ComposeMode,
+  FileNode,
+  SlashCommandAttachment,
+  SlashCommandAttachmentKind,
+} from "../types";
+
+type AutocompleteItem =
+  | { kind: "file"; value: string; label: string; description?: string }
+  | { kind: "skill" | "mcp"; value: string; label: string; description?: string };
 
 interface ChatInputProps {
   value: string;
@@ -13,6 +22,9 @@ interface ChatInputProps {
   fileNodes: FileNode[];
   skillNames?: string[];
   mcpNames?: string[];
+  commandAttachments: SlashCommandAttachment[];
+  onAddCommandAttachment: (kind: SlashCommandAttachmentKind, name: string) => void;
+  onRemoveCommandAttachment: (id: string) => void;
 }
 
 export default function ChatInput({
@@ -27,9 +39,12 @@ export default function ChatInput({
   fileNodes,
   skillNames,
   mcpNames,
+  commandAttachments,
+  onAddCommandAttachment,
+  onRemoveCommandAttachment,
 }: ChatInputProps) {
   const [showAutocomplete, setShowAutocomplete] = useState(false);
-  const [autocompleteItems, setAutocompleteItems] = useState<string[]>([]);
+  const [autocompleteItems, setAutocompleteItems] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const autocompleteRef = useRef<HTMLDivElement>(null);
 
@@ -44,7 +59,8 @@ export default function ChatInput({
       const allPaths = flattenFilePaths(fileNodes);
       const filtered = allPaths
         .filter((p) => p.toLowerCase().includes(query))
-        .slice(0, 8);
+        .slice(0, 8)
+        .map((path) => ({ kind: "file" as const, value: path, label: `@${path}`, description: path }));
       if (filtered.length > 0) {
         setAutocompleteItems(filtered);
         setSelectedIndex(0);
@@ -59,14 +75,35 @@ export default function ChatInput({
   useEffect(() => {
     const cursorPos = inputRef.current?.selectionStart ?? value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
-    const match = textBeforeCursor.match(/^\/(\S*)$/);
+    const match = textBeforeCursor.match(/^\/(?:(skill|mcp)\s+)?([^\s]*)$/);
 
     if (match && (skillNames?.length || mcpNames?.length)) {
-      const query = match[1].toLowerCase();
-      const items: string[] = [];
-      skillNames?.forEach((s) => items.push(`/skill ${s}`));
-      mcpNames?.forEach((m) => items.push(`/mcp ${m}`));
-      const filtered = items.filter((i) => i.toLowerCase().includes(query)).slice(0, 8);
+      const explicitKind = match[1] as SlashCommandAttachmentKind | undefined;
+      const query = match[2].toLowerCase();
+      const items: AutocompleteItem[] = [];
+      if (!explicitKind || explicitKind === "skill") {
+        skillNames?.forEach((name) =>
+          items.push({
+            kind: "skill",
+            value: name,
+            label: `/skill ${name}`,
+            description: "添加到本次请求的技能附件",
+          }),
+        );
+      }
+      if (!explicitKind || explicitKind === "mcp") {
+        mcpNames?.forEach((name) =>
+          items.push({
+            kind: "mcp",
+            value: name,
+            label: `/mcp ${name}`,
+            description: "添加到本次请求的 MCP 附件",
+          }),
+        );
+      }
+      const filtered = items
+        .filter((item) => item.label.toLowerCase().includes(query))
+        .slice(0, 8);
       if (filtered.length > 0) {
         setAutocompleteItems(filtered);
         setSelectedIndex(0);
@@ -74,7 +111,9 @@ export default function ChatInput({
         return;
       }
     }
-    // 仅在 / 触发时设置，这里不重置（由 @ 效果管理重置）
+    if (textBeforeCursor.startsWith("/")) {
+      setShowAutocomplete(false);
+    }
   }, [value, skillNames, mcpNames]);
 
   // 键盘导航自动补全
@@ -92,7 +131,7 @@ export default function ChatInput({
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        insertAutocomplete(autocompleteItems[selectedIndex]);
+        applyAutocomplete(autocompleteItems[selectedIndex]);
         return;
       }
       if (e.key === "Escape") {
@@ -103,7 +142,17 @@ export default function ChatInput({
     onKeyDown(e);
   };
 
-  const insertAutocomplete = (filePath: string) => {
+  const applyAutocomplete = (item: AutocompleteItem) => {
+    if (item.kind === "file") {
+      insertFileAutocomplete(item.value);
+      return;
+    }
+
+    onAddCommandAttachment(item.kind, item.value);
+    clearSlashCommand();
+  };
+
+  const insertFileAutocomplete = (filePath: string) => {
     const cursorPos = inputRef.current?.selectionStart ?? value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
     const match = textBeforeCursor.match(/@([^\s@]*)$/);
@@ -123,6 +172,27 @@ export default function ChatInput({
     }
   };
 
+  const clearSlashCommand = () => {
+    const cursorPos = inputRef.current?.selectionStart ?? value.length;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const match = textBeforeCursor.match(/^\/(?:(skill|mcp)\s+)?([^\s]*)$/);
+    if (!match) {
+      return;
+    }
+
+    const newValue = value.slice(cursorPos).replace(/^\s*/, "");
+    onChange(newValue);
+    setShowAutocomplete(false);
+    setAutocompleteItems([]);
+    setSelectedIndex(0);
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.selectionStart = 0;
+        inputRef.current.selectionEnd = 0;
+      }
+    }, 0);
+  };
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value);
     const el = e.target;
@@ -138,6 +208,26 @@ export default function ChatInput({
     <footer className="border-t border-neutral-800 bg-neutral-925 p-4 shrink-0">
       <div className="max-w-3xl mx-auto relative">
         <div className="relative flex items-end gap-2 bg-neutral-850 rounded-xl border border-neutral-700 focus-within:border-neutral-500 transition-colors p-2">
+          {commandAttachments.length > 0 && (
+            <div className="absolute left-2 right-2 top-2 flex flex-wrap gap-2">
+              {commandAttachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  type="button"
+                  onClick={() => onRemoveCommandAttachment(attachment.id)}
+                  className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                    attachment.kind === "skill"
+                      ? "border-sky-700 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+                      : "border-amber-700 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20"
+                  }`}
+                >
+                  <span>{attachment.kind === "skill" ? "Skill" : "MCP"}</span>
+                  <span className="font-medium">{attachment.name}</span>
+                  <span className="text-neutral-400">×</span>
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={inputRef}
             value={value}
@@ -152,6 +242,7 @@ export default function ChatInput({
             disabled={isLoading}
             className="flex-1 bg-transparent text-sm text-neutral-200 placeholder-neutral-500 
                        resize-none outline-none px-2 py-1 max-h-40 disabled:opacity-50"
+            style={{ paddingTop: commandAttachments.length > 0 ? "2.75rem" : undefined }}
           />
           <button
             type="button"
@@ -196,8 +287,8 @@ export default function ChatInput({
           >
             {autocompleteItems.map((item, idx) => (
               <div
-                key={item}
-                onClick={() => insertAutocomplete(item)}
+                key={`${item.kind}-${item.value}`}
+                onClick={() => applyAutocomplete(item)}
                 className={`px-3 py-1.5 text-xs cursor-pointer flex items-center gap-2 transition-colors ${
                   idx === selectedIndex
                     ? "bg-neutral-700 text-neutral-200"
@@ -205,9 +296,18 @@ export default function ChatInput({
                 }`}
               >
                 <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4z" />
+                  {item.kind === "file" ? (
+                    <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4z" />
+                  ) : (
+                    <path d="M12 2 3 7l9 5 9-5-9-5Zm0 7.2L5.3 6 12 2.8 18.7 6 12 9.2Zm-7 4.2L12 18l7-4.6v4L12 22l-7-4.4v-4Z" />
+                  )}
                 </svg>
-                <span className="truncate">{item}</span>
+                <div className="min-w-0">
+                  <p className="truncate">{item.label}</p>
+                  {item.description && (
+                    <p className="truncate text-[10px] text-neutral-500">{item.description}</p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -231,7 +331,7 @@ export default function ChatInput({
               </span>
             )}
             <span className="text-xs text-neutral-600">
-              @文件路径 引用文件
+              @文件路径 引用文件 · /skill · /mcp 添加本次请求附件
             </span>
           </div>
         </div>

@@ -1,27 +1,33 @@
 import { useEffect, useRef } from "react";
-import type { Message, Turn } from "../types";
+import type { AgentFollowUpAction, Message, Turn } from "../types";
 import TurnList from "./TurnList";
 
 interface MessageListProps {
   messages: Message[];
   turns?: Turn[];
   isLoading: boolean;
+  onAgentFollowUp?: (turn: Turn, action: AgentFollowUpAction) => void;
 }
 
-export default function MessageList({ messages, turns, isLoading }: MessageListProps) {
+export default function MessageList({
+  messages,
+  turns,
+  isLoading,
+  onAgentFollowUp,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, turns]);
 
-  const hasTurns = turns && turns.length > 0;
-  const hasMessages = messages.length > 0;
+  const normalizedTurns = turns && turns.length > 0 ? turns : buildTurnsFromMessages(messages);
+  const hasTurns = normalizedTurns.length > 0;
 
   // 空状态：既无 turns 也无 messages
-  if (!hasTurns && !hasMessages) {
+  if (!hasTurns) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex min-h-0 flex-1 items-center justify-center">
         <div className="text-center">
           <div className="mb-4">
             <svg
@@ -36,7 +42,7 @@ export default function MessageList({ messages, turns, isLoading }: MessageListP
             DeepSeekX
           </h2>
           <p className="text-neutral-500 text-sm">
-            输入任务描述，让 AI 帮你完成
+            输入任务描述，或开启 Agent 让 AI 自动规划并执行
           </p>
         </div>
       </div>
@@ -44,78 +50,66 @@ export default function MessageList({ messages, turns, isLoading }: MessageListP
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
-        {/* Turn 渲染路径（优先） */}
-        {hasTurns ? (
-          <TurnList turns={turns!} />
-        ) : (
-          /* 旧 Message 渲染路径 */
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : msg.role === "system"
-                      ? "bg-neutral-800 text-yellow-300"
-                      : "bg-neutral-850 text-neutral-200"
-                }`}
-              >
-                {msg.role === "user" ? (
-                  <p>{msg.content}</p>
-                ) : (
-                  <div className="prose prose-invert prose-sm max-w-none">
-                    <MessageContent content={msg.content} />
-                  </div>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-        {/* Turn 模式下由 TurnItem 显示加载动画；Message 模式下在底部显示 */}
-        {isLoading && !hasTurns && (
-          <div className="flex justify-start">
-            <div className="bg-neutral-850 rounded-lg px-4 py-3">
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-            </div>
-          </div>
-        )}
+        <TurnList
+          turns={normalizedTurns}
+          isLoading={isLoading}
+          onAgentFollowUp={onAgentFollowUp}
+        />
         <div ref={bottomRef} />
       </div>
     </div>
   );
 }
 
-function MessageContent({ content }: { content: string }) {
-  // 简单的 markdown 代码块渲染
-  const parts = content.split(/(```[\s\S]*?```)/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith("```")) {
-          const code = part
-            .replace(/```\w*\s*file:\S+\n?/, "")  // 去除 file: 标记
-            .replace(/```\w*\n?/, "")             // 普通代码块
-            .replace(/```$/, "");
-          return (
-            <pre
-              key={i}
-              className="bg-neutral-900 rounded-md p-3 my-2 overflow-x-auto text-xs text-neutral-300"
-            >
-              <code>{code}</code>
-            </pre>
-          );
-        }
-        return <span key={i} className="whitespace-pre-wrap">{part}</span>;
-      })}
-    </>
-  );
+function buildTurnsFromMessages(messages: Message[]): Turn[] {
+  const turns: Turn[] = [];
+  let pendingUser: Message | null = null;
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      continue;
+    }
+
+    if (message.role === "user") {
+      pendingUser = message;
+      turns.push({
+        id: `${message.id}-turn`,
+        user_input: message.content,
+        request_attachments: null,
+        thinking_steps: [],
+        final_response: null,
+        agent_steps: null,
+        agent_goal_status: null,
+        duration_ms: null,
+        error_stage: null,
+        retry_count: null,
+      });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const latestTurn = turns[turns.length - 1];
+      if (latestTurn && pendingUser) {
+        latestTurn.final_response = message.content;
+        pendingUser = null;
+      } else {
+        turns.push({
+          id: `${message.id}-assistant-turn`,
+          user_input: "",
+          request_attachments: null,
+          thinking_steps: [],
+          final_response: message.content,
+          agent_steps: null,
+          agent_goal_status: null,
+          duration_ms: null,
+          error_stage: null,
+          retry_count: null,
+        });
+      }
+    }
+  }
+
+  return turns;
 }

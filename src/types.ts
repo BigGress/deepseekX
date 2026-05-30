@@ -10,6 +10,7 @@ export interface ProjectRow {
   pinned_files: string;
   skills: string;
   mcp_servers: string;
+  retrieval_sources: string;
   created_at: number;
   updated_at: number;
 }
@@ -44,6 +45,20 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: number;
+}
+
+export interface LlmRequestLogEntry {
+  timestamp: string;
+  request_id: string;
+  endpoint: string;
+  model: string;
+  web_search_enabled: boolean;
+  request_body: unknown;
+  status_code?: number | null;
+  duration_ms: number;
+  success: boolean;
+  error?: string | null;
+  response_text?: string | null;
 }
 
 export interface Conversation {
@@ -113,10 +128,41 @@ export interface TurnBasedSession {
 export interface Turn {
   id: string;
   user_input: string;
+  request_attachments?: RequestAttachment[] | null;
   thinking_steps: ThinkingStep[];
   final_response: string | null;
   agent_goal_status?: string | null;
   agent_steps?: AgentStep[] | null;
+  duration_ms?: number | null;
+  error_stage?: string | null;
+  retry_count?: number | null;
+  llm_debug_responses?: LlmDebugResponse[] | null;
+}
+
+export type RequestAttachmentKind = "skill" | "mcp" | "file";
+
+export interface RequestAttachment {
+  kind: RequestAttachmentKind;
+  name: string;
+}
+
+export interface LlmDebugResponse {
+  request_id: string;
+  endpoint: string;
+  model: string;
+  web_search_enabled: boolean;
+  duration_ms: number;
+  response_text: string;
+}
+
+export type AgentFollowUpAction = "approve" | "reject" | "retry";
+
+export type SlashCommandAttachmentKind = "skill" | "mcp";
+
+export interface SlashCommandAttachment {
+  id: string;
+  kind: SlashCommandAttachmentKind;
+  name: string;
 }
 
 export interface AgentStep {
@@ -132,6 +178,14 @@ export interface AgentStep {
   before_preview?: string | null;
   after_preview?: string | null;
   diff_preview?: string | null;
+  changed_ranges?: string[] | null;
+  file_operations?: FileOperation[] | null;
+}
+
+export interface FileOperation {
+  path: string;
+  operation: string;
+  target_path?: string | null;
   changed_ranges?: string[] | null;
 }
 
@@ -163,10 +217,79 @@ export interface AgentRunResponse {
   final_response: string;
   goal_status: string;
   steps: AgentStep[];
+  llm_debug_responses?: LlmDebugResponse[] | null;
 }
 
 export interface SlashCommand {
   prefix: string;
   name: string;
   description: string;
+}
+
+// ============ 文件预览系统类型 ============
+
+export type PreviewMode = "structured" | "rendered" | "raw" | "metadata";
+
+export type PreviewCategory =
+  | "text" | "markdown" | "code" | "image" | "audio" | "video"
+  | "pdf" | "html" | "csv" | "spreadsheet" | "document" | "presentation"
+  | "archive" | "binary" | "unknown";
+
+export interface PreviewCapabilities {
+  can_render_inline: boolean;
+  can_open_focused: boolean;
+  can_download: boolean;
+  can_show_text_extract: boolean;
+  can_show_original_appearance: boolean;
+}
+
+export type PreviewContent =
+  | { kind: "text"; text: string; language?: string }
+  | { kind: "markdown"; markdown: string }
+  | { kind: "html"; html: string; sandboxed: boolean }
+  | { kind: "table"; columns: string[]; rows: string[][] }
+  | { kind: "media"; url: string; media_type: "image" | "audio" | "video" | "pdf" }
+  | { kind: "pages"; pages: Array<{ page: number; image_url: string }> }
+  | { kind: "fallback"; message: string };
+
+export interface PreviewMetadata {
+  detected_encoding?: string;
+  line_count?: number;
+  page_count?: number;
+  sheet_names?: string[];
+  width?: number;
+  height?: number;
+  duration_seconds?: number;
+  generated_by?: string;
+}
+
+export interface PreviewDescriptor {
+  path: string;
+  file_name: string;
+  extension: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  category: PreviewCategory;
+  default_mode: PreviewMode;
+  available_modes: PreviewMode[];
+  capabilities: PreviewCapabilities;
+  content: PreviewContent | null;
+  metadata: PreviewMetadata | null;
+  warnings: string[];
+}
+
+export interface PreviewTarget {
+  path: string;
+  source: "file_tree" | "chat_attachment" | "artifact" | "diff";
+  title?: string;
+}
+
+export interface PreviewState {
+  isOpen: boolean;
+  target: PreviewTarget | null;
+  descriptor: PreviewDescriptor | null;
+  selectedMode: PreviewMode | null;
+  isLoading: boolean;
+  error: string | null;
+  focusedView: boolean;
 }

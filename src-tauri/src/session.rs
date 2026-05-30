@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
+use crate::agent::state::AgentSessionStateMachine;
+use crate::api::LlmDebugResponse;
+
 // ---------- Session 文件结构 ----------
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -10,6 +13,7 @@ pub struct SessionFile {
     pub metadata: SessionMetadata,
     pub system_prompt: Option<String>,
     pub messages: Vec<Value>,
+    pub agent_session_state: Option<AgentSessionStateMachine>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -46,6 +50,16 @@ pub struct SessionMessages {
     pub system_prompt: Option<String>,
 }
 
+pub fn conversation_state_or_default(
+    session_file: &SessionFile,
+    conversation_id: &str,
+) -> AgentSessionStateMachine {
+    session_file
+        .agent_session_state
+        .clone()
+        .unwrap_or_else(|| AgentSessionStateMachine::new(conversation_id.to_string()))
+}
+
 // ---------- Turn 分组类型 ----------
 
 #[derive(Debug, Serialize, Clone)]
@@ -60,10 +74,21 @@ pub struct TurnBasedSession {
 pub struct Turn {
     pub id: String,
     pub user_input: String,
+    pub request_attachments: Option<Vec<RequestAttachment>>,
     pub thinking_steps: Vec<ThinkingStep>,
     pub final_response: Option<String>,
     pub agent_goal_status: Option<String>,
     pub agent_steps: Option<Vec<AgentStep>>,
+    pub duration_ms: Option<u64>,
+    pub error_stage: Option<String>,
+    pub retry_count: Option<u64>,
+    pub llm_debug_responses: Option<Vec<LlmDebugResponse>>,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct RequestAttachment {
+    pub kind: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq, Eq)]
@@ -80,6 +105,15 @@ pub struct AgentStep {
     pub before_preview: Option<String>,
     pub after_preview: Option<String>,
     pub diff_preview: Option<String>,
+    pub changed_ranges: Option<Vec<String>>,
+    pub file_operations: Option<Vec<FileOperation>>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, Eq)]
+pub struct FileOperation {
+    pub path: String,
+    pub operation: String,
+    pub target_path: Option<String>,
     pub changed_ranges: Option<Vec<String>>,
 }
 
@@ -136,6 +170,81 @@ fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ParsedUserInput {
+    user_input: String,
+    request_attachments: Option<Vec<RequestAttachment>>,
+}
+
+fn parse_request_attachments(raw_input: &str) -> ParsedUserInput {
+    let mut attachments: Vec<RequestAttachment> = Vec::new();
+    let mut content_lines: Vec<String> = Vec::new();
+
+    for line in raw_input.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("本次请求显式附加技能:") {
+            attachments.extend(
+                rest.split(',')
+                    .map(|item| item.trim())
+                    .filter(|item| !item.is_empty())
+                    .map(|name| RequestAttachment {
+                        kind: "skill".to_string(),
+                        name: name.to_string(),
+                    }),
+            );
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("本次请求显式附加 MCP:") {
+            attachments.extend(
+                rest.split(',')
+                    .map(|item| item.trim())
+                    .filter(|item| !item.is_empty())
+                    .map(|name| RequestAttachment {
+                        kind: "mcp".to_string(),
+                        name: name.to_string(),
+                    }),
+            );
+            continue;
+        }
+
+        content_lines.push(line.to_string());
+
+        for token in trimmed.split_whitespace() {
+            if let Some(path) = token.strip_prefix('@') {
+                let path = path.trim_matches(|c: char| matches!(c, ',' | '，' | ';' | '；' | ')' | ']' | '"' | '\''));
+                if path.is_empty() {
+                    continue;
+                }
+                let looks_like_path = path.contains('/') || path.contains('.') || path.contains('\\');
+                if looks_like_path
+                    && !attachments
+                        .iter()
+                        .any(|item| item.kind == "file" && item.name == path)
+                {
+                    attachments.push(RequestAttachment {
+                        kind: "file".to_string(),
+                        name: path.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    let user_input = content_lines
+        .join("\n")
+        .trim()
+        .to_string();
+
+    ParsedUserInput {
+        user_input,
+        request_attachments: if attachments.is_empty() {
+            None
+        } else {
+            Some(attachments)
+        },
+    }
+}
+
 /// 截断并格式化工具输入参数
 fn summarize_tool_input(input: &Value, max_chars: usize) -> String {
     let s = match input {
@@ -153,24 +262,76 @@ fn parse_agent_steps(value: Option<&Value>) -> Option<Vec<AgentStep>> {
         .filter_map(|step| {
             Some(AgentStep {
                 action_name: step.get("action_name")?.as_str()?.to_string(),
-                reason: step.get("reason").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                input_summary: step.get("input_summary").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                result_summary: step.get("result_summary").and_then(|v| v.as_str()).map(|v| v.to_string()),
+                reason: step
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                input_summary: step
+                    .get("input_summary")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                result_summary: step
+                    .get("result_summary")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
                 summary: step.get("summary")?.as_str()?.to_string(),
-                status: step.get("status").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                is_error: step.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false),
-                requires_confirmation: step
-                    .get("requires_confirmation")
-                    .and_then(|v| v.as_bool()),
-                preview_type: step.get("preview_type").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                before_preview: step.get("before_preview").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                after_preview: step.get("after_preview").and_then(|v| v.as_str()).map(|v| v.to_string()),
-                diff_preview: step.get("diff_preview").and_then(|v| v.as_str()).map(|v| v.to_string()),
+                status: step
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                is_error: step
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                requires_confirmation: step.get("requires_confirmation").and_then(|v| v.as_bool()),
+                preview_type: step
+                    .get("preview_type")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                before_preview: step
+                    .get("before_preview")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                after_preview: step
+                    .get("after_preview")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                diff_preview: step
+                    .get("diff_preview")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
                 changed_ranges: step.get("changed_ranges").and_then(|v| {
                     v.as_array().map(|items| {
                         items
                             .iter()
                             .filter_map(|item| item.as_str().map(|value| value.to_string()))
+                            .collect::<Vec<_>>()
+                    })
+                }),
+                file_operations: step.get("file_operations").and_then(|v| {
+                    v.as_array().map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| {
+                                Some(FileOperation {
+                                    path: item.get("path")?.as_str()?.to_string(),
+                                    operation: item.get("operation")?.as_str()?.to_string(),
+                                    target_path: item
+                                        .get("target_path")
+                                        .and_then(|value| value.as_str())
+                                        .map(|value| value.to_string()),
+                                    changed_ranges: item.get("changed_ranges").and_then(|value| {
+                                        value.as_array().map(|ranges| {
+                                            ranges
+                                                .iter()
+                                                .filter_map(|range| {
+                                                    range.as_str().map(|text| text.to_string())
+                                                })
+                                                .collect::<Vec<_>>()
+                                        })
+                                    }),
+                                })
+                            })
                             .collect::<Vec<_>>()
                     })
                 }),
@@ -185,17 +346,33 @@ fn parse_agent_steps(value: Option<&Value>) -> Option<Vec<AgentStep>> {
     }
 }
 
+fn parse_llm_debug_responses(value: Option<&Value>) -> Option<Vec<LlmDebugResponse>> {
+    let entries = value?.as_array()?;
+    let parsed: Vec<LlmDebugResponse> = entries
+        .iter()
+        .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+        .collect();
+
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
+}
+
 /// 将 session 的原始消息分组为 Turn 列表
-pub fn group_into_turns(
-    session_id: &str,
-    messages: &[Value],
-) -> Vec<Turn> {
+pub fn group_into_turns(session_id: &str, messages: &[Value]) -> Vec<Turn> {
     let mut turns: Vec<Turn> = Vec::new();
     let mut current_user_input: Option<String> = None;
+    let mut current_request_attachments: Option<Vec<RequestAttachment>> = None;
     let mut current_steps: Vec<ThinkingStep> = Vec::new();
     let mut current_final: Option<String> = None;
     let mut current_agent_goal_status: Option<String> = None;
     let mut current_agent_steps: Option<Vec<AgentStep>> = None;
+    let mut current_duration_ms: Option<u64> = None;
+    let mut current_error_stage: Option<String> = None;
+    let mut current_retry_count: Option<u64> = None;
+    let mut current_llm_debug_responses: Option<Vec<LlmDebugResponse>> = None;
     let mut current_thinking: Option<String> = None;
     let mut current_tool_calls: Vec<ToolCallSummary> = Vec::new();
 
@@ -212,9 +389,9 @@ pub fn group_into_turns(
         };
         let is_plain_text = matches!(content, Some(Value::String(_)));
 
-        let has_tool_result = blocks.iter().any(|b| {
-            b.get("type").and_then(|v| v.as_str()) == Some("tool_result")
-        });
+        let has_tool_result = blocks
+            .iter()
+            .any(|b| b.get("type").and_then(|v| v.as_str()) == Some("tool_result"));
 
         if role == "user" && !has_tool_result {
             // 新用户输入 → 提交当前 Turn
@@ -230,10 +407,15 @@ pub fn group_into_turns(
                 turns.push(Turn {
                     id: turn_id,
                     user_input: user_input.trim().to_string(),
+                    request_attachments: current_request_attachments.take(),
                     thinking_steps: std::mem::take(&mut current_steps),
                     final_response: current_final.take(),
                     agent_goal_status: current_agent_goal_status.take(),
                     agent_steps: current_agent_steps.take(),
+                    duration_ms: current_duration_ms.take(),
+                    error_stage: current_error_stage.take(),
+                    retry_count: current_retry_count.take(),
+                    llm_debug_responses: current_llm_debug_responses.take(),
                 });
             }
             if is_plain_text {
@@ -241,18 +423,27 @@ pub fn group_into_turns(
                 let text = content.and_then(|v| v.as_str()).unwrap_or("");
                 // 跳过系统注入的 turn_meta
                 if !text.trim_start().starts_with("<turn_meta>") {
-                    current_user_input = Some(text.to_string());
+                    let parsed = parse_request_attachments(text);
+                    current_request_attachments = parsed.request_attachments;
+                    current_user_input = Some(parsed.user_input);
                 } else {
                     current_user_input = Some(String::new());
+                    current_request_attachments = None;
                 }
             } else {
                 let input_blocks: Vec<Value> = blocks.iter().map(|&v| v.clone()).collect();
-                current_user_input = Some(extract_user_input(&input_blocks));
+                let parsed = parse_request_attachments(&extract_user_input(&input_blocks));
+                current_request_attachments = parsed.request_attachments;
+                current_user_input = Some(parsed.user_input);
             }
             current_steps = Vec::new();
             current_final = None;
             current_agent_goal_status = None;
             current_agent_steps = None;
+            current_duration_ms = None;
+            current_error_stage = None;
+            current_retry_count = None;
+            current_llm_debug_responses = None;
             current_thinking = None;
             current_tool_calls = Vec::new();
         } else if role == "assistant" {
@@ -262,6 +453,13 @@ pub fn group_into_turns(
             if let Some(agent_steps) = parse_agent_steps(msg.get("agent_steps")) {
                 current_agent_steps = Some(agent_steps);
             }
+            current_duration_ms = msg.get("duration_ms").and_then(|v| v.as_u64());
+            current_error_stage = msg
+                .get("error_stage")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string());
+            current_retry_count = msg.get("retry_count").and_then(|v| v.as_u64());
+            current_llm_debug_responses = parse_llm_debug_responses(msg.get("llm_debug_responses"));
 
             // GUI API 格式：纯文本字符串 → 直接作为 final_response
             if is_plain_text {
@@ -281,10 +479,8 @@ pub fn group_into_turns(
                 match block_type {
                     "thinking" => {
                         has_thinking = true;
-                        let thinking_text = block
-                            .get("thinking")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let thinking_text =
+                            block.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
                         current_thinking = Some(truncate(thinking_text, 200));
                     }
                     "tool_use" => {
@@ -386,10 +582,15 @@ pub fn group_into_turns(
         turns.push(Turn {
             id: turn_id,
             user_input: user_input.trim().to_string(),
+            request_attachments: current_request_attachments,
             thinking_steps: current_steps,
             final_response: current_final,
             agent_goal_status: current_agent_goal_status,
             agent_steps: current_agent_steps,
+            duration_ms: current_duration_ms,
+            error_stage: current_error_stage,
+            retry_count: current_retry_count,
+            llm_debug_responses: current_llm_debug_responses,
         });
     }
 
@@ -421,7 +622,8 @@ pub fn list_available_skills() -> Vec<SkillInfo> {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    let name = path.file_name()
+                    let name = path
+                        .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
                     let skill_md = path.join("SKILL.md");
@@ -432,7 +634,11 @@ pub fn list_available_skills() -> Vec<SkillInfo> {
                                 s.lines()
                                     .skip_while(|l| !l.starts_with("- ") && !l.starts_with("> "))
                                     .next()
-                                    .map(|l| l.trim_start_matches("- ").trim_start_matches("> ").to_string())
+                                    .map(|l| {
+                                        l.trim_start_matches("- ")
+                                            .trim_start_matches("> ")
+                                            .to_string()
+                                    })
                             })
                             .unwrap_or_default()
                     } else {
@@ -465,6 +671,31 @@ fn session_path(session_id: &str) -> Result<PathBuf, String> {
     Ok(sessions_dir()?.join(format!("{}.json", session_id)))
 }
 
+pub fn read_session_file(session_id: &str) -> Result<SessionFile, String> {
+    let path = session_path(session_id)?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|_| format!("会话 {} 不存在", session_id))?;
+    serde_json::from_str(&content).map_err(|e| format!("解析会话文件失败: {}", e))
+}
+
+pub fn persist_agent_session_state(
+    session_id: &str,
+    state: &AgentSessionStateMachine,
+) -> Result<(), String> {
+    let path = session_path(session_id)?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|_| format!("会话 {} 不存在或无法读取", session_id))?;
+    let mut session: SessionFile =
+        serde_json::from_str(&content).map_err(|e| format!("解析会话文件失败: {}", e))?;
+    session.agent_session_state = Some(state.clone());
+    session.metadata.updated_at = Some(chrono::Utc::now().to_rfc3339());
+
+    let updated =
+        serde_json::to_string_pretty(&session).map_err(|e| format!("序列化会话文件失败: {}", e))?;
+    std::fs::write(&path, updated).map_err(|e| format!("写入会话文件失败: {}", e))?;
+    Ok(())
+}
+
 // ---------- 读取操作 ----------
 
 /// 列出所有 TUI sessions，可按 workspace 过滤
@@ -476,7 +707,8 @@ pub fn list_sessions(workspace_filter: Option<&str>) -> Result<Vec<SessionSummar
 
     let mut summaries: Vec<SessionSummary> = Vec::new();
 
-    for entry in std::fs::read_dir(&dir).map_err(|e| format!("读取 sessions 目录失败: {}", e))? {
+    for entry in std::fs::read_dir(&dir).map_err(|e| format!("读取 sessions 目录失败: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let path = entry.path();
 
@@ -511,10 +743,16 @@ pub fn list_sessions(workspace_filter: Option<&str>) -> Result<Vec<SessionSummar
 
         summaries.push(SessionSummary {
             id,
-            title: session.metadata.title.unwrap_or_else(|| "未命名对话".into()),
+            title: session
+                .metadata
+                .title
+                .unwrap_or_else(|| "未命名对话".into()),
             message_count: session.metadata.message_count.unwrap_or(0),
             workspace,
-            model: session.metadata.model.unwrap_or_else(|| "deepseek-chat".into()),
+            model: session
+                .metadata
+                .model
+                .unwrap_or_else(|| "deepseek-chat".into()),
             session_path: path.to_string_lossy().to_string(),
             updated_at: session.metadata.updated_at.unwrap_or_default(),
         });
@@ -528,14 +766,13 @@ pub fn list_sessions(workspace_filter: Option<&str>) -> Result<Vec<SessionSummar
 
 /// 读取指定 session 的所有消息
 pub fn read_session(session_id: &str) -> Result<SessionMessages, String> {
-    let path = session_path(session_id)?;
-    let content =
-        std::fs::read_to_string(&path).map_err(|_| format!("会话 {} 不存在", session_id))?;
+    let session = read_session_file(session_id)?;
 
-    let session: SessionFile =
-        serde_json::from_str(&content).map_err(|e| format!("解析会话文件失败: {}", e))?;
-
-    let id = session.metadata.id.clone().unwrap_or_else(|| session_id.to_string());
+    let id = session
+        .metadata
+        .id
+        .clone()
+        .unwrap_or_else(|| session_id.to_string());
 
     Ok(SessionMessages {
         id,
@@ -578,8 +815,8 @@ pub fn append_messages(
         meta.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    let updated = serde_json::to_string_pretty(&session)
-        .map_err(|e| format!("序列化会话文件失败: {}", e))?;
+    let updated =
+        serde_json::to_string_pretty(&session).map_err(|e| format!("序列化会话文件失败: {}", e))?;
 
     std::fs::write(&path, updated).map_err(|e| format!("写入会话文件失败: {}", e))?;
 
@@ -589,9 +826,11 @@ pub fn append_messages(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_messages, create_session, delete_session, group_into_turns, list_sessions,
-        read_session,
+        append_messages, conversation_state_or_default, create_session, delete_session,
+        group_into_turns, list_sessions, persist_agent_session_state, read_session,
+        SessionFile, SessionMetadata,
     };
+    use crate::agent::state::AgentSessionStateMachine;
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -606,7 +845,8 @@ mod tests {
     fn with_temp_home<T>(f: impl FnOnce(PathBuf) -> T) -> T {
         let _guard = test_env_lock().lock().unwrap();
         let original_home = std::env::var("HOME").ok();
-        let temp_home = std::env::temp_dir().join(format!("deepseekx-session-home-{}", Uuid::new_v4()));
+        let temp_home =
+            std::env::temp_dir().join(format!("deepseekx-session-home-{}", Uuid::new_v4()));
         fs::create_dir_all(&temp_home).unwrap();
         unsafe {
             std::env::set_var("HOME", &temp_home);
@@ -721,7 +961,10 @@ mod tests {
                 before_file.metadata.updated_at,
                 after_file.metadata.updated_at
             );
-            assert_eq!(after_file.metadata.message_count, Some(after.messages.len() as i64));
+            assert_eq!(
+                after_file.metadata.message_count,
+                Some(after.messages.len() as i64)
+            );
             assert_eq!(turns.len(), 2);
             assert_eq!(turns[1].agent_goal_status.as_deref(), Some("done"));
             assert_eq!(
@@ -733,6 +976,162 @@ mod tests {
                 Some("cargo test")
             );
         });
+    }
+
+    #[test]
+    fn session_file_deserializes_without_agent_session_state() {
+        let raw = r#"{
+          "metadata": {"id":"conv-1","title":"Example"},
+          "system_prompt": null,
+          "messages": []
+        }"#;
+
+        let parsed: SessionFile = serde_json::from_str(raw).unwrap();
+        assert!(parsed.agent_session_state.is_none());
+    }
+
+    #[test]
+    fn session_file_round_trips_agent_session_state() {
+        let file = SessionFile {
+            schema_version: Some(1),
+            metadata: SessionMetadata {
+                id: Some("conv-1".into()),
+                title: Some("Example".into()),
+                created_at: None,
+                updated_at: None,
+                message_count: None,
+                total_tokens: None,
+                model: None,
+                workspace: None,
+                mode: None,
+            },
+            system_prompt: None,
+            messages: vec![],
+            agent_session_state: Some(AgentSessionStateMachine::new("conv-1".into())),
+        };
+
+        let encoded = serde_json::to_string(&file).unwrap();
+        let decoded: SessionFile = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.agent_session_state.is_some());
+    }
+
+    #[test]
+    fn conversation_state_or_default_builds_new_state_when_missing() {
+        let file = SessionFile {
+            schema_version: Some(1),
+            metadata: SessionMetadata {
+                id: Some("conv-2".into()),
+                title: Some("Example".into()),
+                created_at: None,
+                updated_at: None,
+                message_count: None,
+                total_tokens: None,
+                model: None,
+                workspace: None,
+                mode: None,
+            },
+            system_prompt: None,
+            messages: vec![],
+            agent_session_state: None,
+        };
+
+        let state = conversation_state_or_default(&file, "conv-2");
+        assert_eq!(state.conversation_id, "conv-2");
+        assert_eq!(state.version, 1);
+    }
+
+    #[test]
+    fn persist_agent_session_state_updates_existing_session_file() {
+        with_temp_home(|home| {
+            let session_id = format!("session-{}", Uuid::new_v4());
+            create_session(
+                &session_id,
+                "状态持久化",
+                "/tmp/workspace",
+                "agent-loop",
+                "Agent mode",
+                json!({"role": "user", "content": "hello"}),
+                json!({"role": "assistant", "content": "world"}),
+            )
+            .unwrap();
+
+            let mut state = AgentSessionStateMachine::new(session_id.clone());
+            state.phase = crate::agent::state::AgentPhase::Verifying;
+            state.facts.verified_sources = vec!["docs/spec.md".into()];
+            persist_agent_session_state(&session_id, &state).unwrap();
+
+            let content = fs::read_to_string(
+                home.join(".deepseek")
+                    .join("sessions")
+                    .join(format!("{}.json", session_id)),
+            )
+            .unwrap();
+            let after_file = serde_json::from_str::<super::SessionFile>(&content).unwrap();
+
+            assert_eq!(
+                after_file
+                    .agent_session_state
+                    .as_ref()
+                    .map(|value| value.phase.clone()),
+                Some(crate::agent::state::AgentPhase::Verifying)
+            );
+            assert_eq!(
+                after_file
+                    .agent_session_state
+                    .as_ref()
+                    .map(|value| value.facts.verified_sources.clone()),
+                Some(vec!["docs/spec.md".to_string()])
+            );
+        });
+    }
+
+    #[test]
+    fn group_into_turns_extracts_request_attachments_and_status_metadata() {
+        let turns = group_into_turns(
+            "session-attachments",
+            &[
+                json!({
+                    "role": "user",
+                    "content": "本次请求显式附加技能: browser, gmail\n本次请求显式附加 MCP: fetch\n\n帮我整理这个页面"
+                }),
+                json!({
+                    "role": "assistant",
+                    "content": "整理完成",
+                    "agent_goal_status": "blocked",
+                    "duration_ms": 1820,
+                    "error_stage": "agent_plan",
+                    "retry_count": 2
+                }),
+            ],
+        );
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].user_input, "帮我整理这个页面");
+        assert_eq!(turns[0].duration_ms, Some(1820));
+        assert_eq!(turns[0].error_stage.as_deref(), Some("agent_plan"));
+        assert_eq!(turns[0].retry_count, Some(2));
+        let attachments = turns[0].request_attachments.as_ref().expect("attachments");
+        assert_eq!(attachments.len(), 3);
+        assert!(attachments.iter().any(|item| item.kind == "skill" && item.name == "browser"));
+        assert!(attachments.iter().any(|item| item.kind == "skill" && item.name == "gmail"));
+        assert!(attachments.iter().any(|item| item.kind == "mcp" && item.name == "fetch"));
+    }
+
+    #[test]
+    fn group_into_turns_extracts_file_reference_attachments() {
+        let turns = group_into_turns(
+            "session-files",
+            &[json!({
+                "role": "user",
+                "content": "请查看 @src/components/TurnItem.tsx 和 @docs/spec.md"
+            })],
+        );
+
+        assert_eq!(turns.len(), 1);
+        let attachments = turns[0].request_attachments.as_ref().expect("attachments");
+        assert_eq!(attachments.len(), 2);
+        assert!(attachments.iter().any(|item| item.kind == "file" && item.name == "src/components/TurnItem.tsx"));
+        assert!(attachments.iter().any(|item| item.kind == "file" && item.name == "docs/spec.md"));
     }
 
     #[test]
@@ -791,7 +1190,10 @@ mod tests {
             delete_session(&session_id).unwrap();
 
             assert!(!path.exists(), "session file should be removed from disk");
-            assert!(read_session(&session_id).is_err(), "deleted session should not be readable");
+            assert!(
+                read_session(&session_id).is_err(),
+                "deleted session should not be readable"
+            );
             assert!(
                 list_sessions(None)
                     .unwrap()
@@ -836,10 +1238,11 @@ pub fn create_session(
         },
         system_prompt: Some(system_prompt.to_string()),
         messages: vec![user_msg, assistant_msg],
+        agent_session_state: None,
     };
 
-    let content = serde_json::to_string_pretty(&session)
-        .map_err(|e| format!("序列化会话文件失败: {}", e))?;
+    let content =
+        serde_json::to_string_pretty(&session).map_err(|e| format!("序列化会话文件失败: {}", e))?;
 
     std::fs::write(&path, content).map_err(|e| format!("写入会话文件失败: {}", e))?;
 

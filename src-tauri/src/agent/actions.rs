@@ -14,6 +14,22 @@ pub enum AgentAction {
         reason: String,
         files: Vec<String>,
     },
+    CreateFiles {
+        reason: String,
+        files: Vec<WriteFileRequest>,
+    },
+    RenameFiles {
+        reason: String,
+        renames: Vec<RenameFileRequest>,
+    },
+    DeleteFiles {
+        reason: String,
+        paths: Vec<String>,
+    },
+    ApplyPatch {
+        reason: String,
+        patches: Vec<PatchFileRequest>,
+    },
     WriteFiles {
         reason: String,
         files: Vec<WriteFileRequest>,
@@ -22,6 +38,22 @@ pub enum AgentAction {
         reason: String,
         command: String,
         cwd: Option<String>,
+    },
+    FetchUrl {
+        reason: String,
+        url: String,
+        method: FetchMethod,
+        max_chars: Option<usize>,
+    },
+    VerifyChecks {
+        reason: String,
+        checks: Vec<VerificationCheck>,
+    },
+    CallMcpTool {
+        reason: String,
+        server: String,
+        tool: String,
+        arguments: serde_json::Value,
     },
     SummarizeFindings {
         reason: String,
@@ -46,6 +78,39 @@ pub enum AgentAction {
 pub struct WriteFileRequest {
     pub path: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PatchFileRequest {
+    pub path: String,
+    pub hunks: Vec<PatchHunkRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PatchHunkRequest {
+    pub old_text: String,
+    pub new_text: String,
+    pub occurrence: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RenameFileRequest {
+    pub from_path: String,
+    pub to_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FetchMethod {
+    Get,
+    Head,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VerificationCheck {
+    pub label: String,
+    pub command: String,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

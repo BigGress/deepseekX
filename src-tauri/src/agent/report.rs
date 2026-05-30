@@ -19,6 +19,25 @@ pub fn summarize_observations(
         if !observation.result_summary.trim().is_empty() {
             lines.push(format!("  结果: {}", observation.result_summary));
         }
+        if let Some(file_operations) = observation.file_operations.as_ref() {
+            for operation in file_operations {
+                let target = operation
+                    .target_path
+                    .as_deref()
+                    .map(|value| format!(" -> {}", value))
+                    .unwrap_or_default();
+                let ranges = operation
+                    .changed_ranges
+                    .as_ref()
+                    .filter(|items| !items.is_empty())
+                    .map(|items| format!(" ({})", items.join(", ")))
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "  文件: {} {}{}{}",
+                    operation.operation, operation.path, target, ranges
+                ));
+            }
+        }
         if let Some(diff) = observation.diff_preview.as_ref() {
             lines.push(format!("  Diff:\n{}", diff));
         } else if let Some(after) = observation.after_preview.as_ref() {
@@ -32,7 +51,7 @@ pub fn summarize_observations(
 #[cfg(test)]
 mod tests {
     use super::summarize_observations;
-    use crate::agent::state::{AgentObservation, AgentStepStatus};
+    use crate::agent::state::{AgentObservation, AgentStepStatus, FileOperationKind, FileOperationResult};
 
     #[test]
     fn builds_summary_from_recent_observations() {
@@ -51,6 +70,12 @@ mod tests {
                 after_preview: Some("new code".into()),
                 diff_preview: None,
                 changed_ranges: None,
+                file_operations: Some(vec![FileOperationResult {
+                    path: "src/App.tsx".into(),
+                    operation: FileOperationKind::Overwrite,
+                    target_path: None,
+                    changed_ranges: Some(vec!["src/App.tsx:1-10".into()]),
+                }]),
             }],
             "改动整理",
             "change_summary",
@@ -58,5 +83,6 @@ mod tests {
 
         assert!(summary.contains("改动整理"));
         assert!(summary.contains("write_files"));
+        assert!(summary.contains("overwrite"));
     }
 }

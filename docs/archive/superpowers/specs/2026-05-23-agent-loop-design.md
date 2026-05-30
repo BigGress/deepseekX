@@ -1,7 +1,7 @@
 # DeepSeekX 应用内自动规划 Agent 设计
 
 > 日期：2026-05-23
-> 状态：Draft
+> 状态：Archived
 > 主题：应用内多步执行 Agent Loop
 
 ---

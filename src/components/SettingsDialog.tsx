@@ -3,35 +3,54 @@ import { useState, useEffect } from "react";
 interface SettingsDialogProps {
   open: boolean;
   apiKey: string;
+  knowledgeBasePaths: string;
+  commandAllowlist: string;
+  debugLlmResponses: boolean;
   onClose: () => void;
-  onSave: (apiKey: string) => void;
+  onSave: (
+    apiKey: string,
+    knowledgeBasePaths: string,
+    commandAllowlist: string,
+    debugLlmResponses: boolean,
+  ) => void;
 }
 
 export default function SettingsDialog({
   open,
   apiKey,
+  knowledgeBasePaths,
+  commandAllowlist,
+  debugLlmResponses,
   onClose,
   onSave,
 }: SettingsDialogProps) {
   const [key, setKey] = useState(apiKey);
+  const [kbPaths, setKbPaths] = useState(knowledgeBasePaths);
+  const [commandEntries, setCommandEntries] = useState(commandAllowlist);
+  const [debugEnabled, setDebugEnabled] = useState(debugLlmResponses);
   const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
-    if (open) setKey(apiKey);
-  }, [open, apiKey]);
+    if (open) {
+      setKey(apiKey);
+      setKbPaths(knowledgeBasePaths);
+      setCommandEntries(commandAllowlist);
+      setDebugEnabled(debugLlmResponses);
+    }
+  }, [open, apiKey, knowledgeBasePaths, commandAllowlist, debugLlmResponses]);
 
   if (!open) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(key.trim());
+    onSave(key.trim(), kbPaths.trim(), commandEntries.trim(), debugEnabled);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div
-        className="bg-neutral-925 border border-neutral-800 rounded-xl w-full max-w-md mx-4 shadow-2xl"
+        className="bg-neutral-925 border border-neutral-800 rounded-xl w-full max-w-2xl mx-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
@@ -90,6 +109,64 @@ export default function SettingsDialog({
               </a>{" "}
               获取 API Key
             </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-neutral-400 mb-1.5">
+              知识库路径
+            </label>
+            <textarea
+              value={kbPaths}
+              onChange={(e) => setKbPaths(e.target.value)}
+              placeholder={"/Users/you/Notes\n/Users/you/reference.md"}
+              rows={4}
+              className="w-full bg-neutral-850 border border-neutral-700 rounded-md px-3 py-2 text-sm text-neutral-200
+                         placeholder-neutral-500 outline-none focus:border-neutral-500 transition-colors resize-none"
+            />
+            <p className="text-xs text-neutral-600 mt-1.5">
+              每行一个文件或目录。`retrieve_context` 的 `user_knowledge_base` 会扫描这些路径。
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-neutral-400 mb-1.5">
+              命令白名单
+            </label>
+            <textarea
+              value={commandEntries}
+              onChange={(e) => setCommandEntries(e.target.value)}
+              placeholder={"pnpm run dev\npython -m pytest\nnpm run build"}
+              rows={4}
+              className="w-full bg-neutral-850 border border-neutral-700 rounded-md px-3 py-2 text-sm text-neutral-200
+                         placeholder-neutral-500 outline-none focus:border-neutral-500 transition-colors resize-none"
+            />
+            <p className="text-xs text-neutral-600 mt-1.5">
+              每行一个命令前缀。命中后会直接执行，不再额外确认；仍不支持复合 shell 语法。
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs text-neutral-300">调试模式：展示 LLM 接口返回</p>
+                <p className="mt-1 text-xs text-neutral-500">
+                  开启后，聊天窗口底部会展示最近的原始接口返回数据，便于排查 planner / retrieval / chat 输出问题。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDebugEnabled((value) => !value)}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  debugEnabled ? "bg-emerald-500" : "bg-neutral-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    debugEnabled ? "translate-x-5" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

@@ -1,8 +1,9 @@
 pub mod actions;
 pub mod executor;
+pub mod mcp;
 pub mod orchestrator;
-pub mod planner;
 pub mod permissions;
+pub mod planner;
 pub mod report;
 pub mod retrieval;
 pub mod state;

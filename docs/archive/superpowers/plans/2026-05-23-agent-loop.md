@@ -8,6 +8,8 @@
 
 **Tech Stack:** Tauri 2, Rust, reqwest, tokio, React 18, TypeScript, Vite
 
+**Status:** Archived
+
 ---
 
 > Notes:

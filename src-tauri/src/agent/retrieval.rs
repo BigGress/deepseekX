@@ -3,9 +3,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use walkdir::WalkDir;
 
 use crate::agent::actions::{ContextSource, RetrievalIntent};
+use crate::api::{self, ApiConfig, LlmDebugResponse};
 const MAX_SNIPPET_CHARS: usize = 320;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -23,32 +25,50 @@ pub struct ContextHit {
 pub struct RetrievalResponse {
     pub hits: Vec<ContextHit>,
     pub unavailable_sources: Vec<String>,
+    pub llm_debug_responses: Vec<LlmDebugResponse>,
 }
 
 pub async fn retrieve_context(
+    config: Option<&ApiConfig>,
     workspace_root: &str,
     query: &str,
     intent: &RetrievalIntent,
     preferred_sources: Option<&[ContextSource]>,
     max_results: usize,
+    user_knowledge_base_paths: &[String],
 ) -> Result<RetrievalResponse, String> {
     let sources = expand_sources(preferred_sources);
     let mut hits: Vec<ContextHit> = Vec::new();
     let mut unavailable_sources: Vec<String> = Vec::new();
+    let mut llm_debug_responses: Vec<LlmDebugResponse> = Vec::new();
 
     for source in sources {
         match source {
             ContextSource::WorkspaceCode => {
-                hits.extend(scan_source(workspace_root, query, SourceKind::Code, max_results).await?);
+                hits.extend(
+                    scan_source(workspace_root, query, SourceKind::Code, max_results).await?,
+                );
             }
             ContextSource::WorkspaceDocs => {
-                hits.extend(scan_source(workspace_root, query, SourceKind::Docs, max_results).await?);
+                hits.extend(
+                    scan_source(workspace_root, query, SourceKind::Docs, max_results).await?,
+                );
             }
             ContextSource::UserKnowledgeBase => {
-                unavailable_sources.push("user_knowledge_base".into());
+                match scan_user_knowledge_base(query, max_results, user_knowledge_base_paths).await
+                {
+                    Ok(mut kb_hits) if !kb_hits.is_empty() => hits.append(&mut kb_hits),
+                    _ => unavailable_sources.push("user_knowledge_base".into()),
+                }
             }
             ContextSource::WebSearch => {
-                unavailable_sources.push("web_search".into());
+                match search_web_context(config, query, max_results).await {
+                    Ok((web_hits, mut debug_entries)) => {
+                        hits.extend(web_hits);
+                        llm_debug_responses.append(&mut debug_entries);
+                    }
+                    Err(_) => unavailable_sources.push("web_search".into()),
+                }
             }
         }
     }
@@ -60,6 +80,7 @@ pub async fn retrieve_context(
     Ok(RetrievalResponse {
         hits,
         unavailable_sources,
+        llm_debug_responses,
     })
 }
 
@@ -136,6 +157,236 @@ async fn scan_source(
     Ok(hits)
 }
 
+async fn scan_user_knowledge_base(
+    query: &str,
+    max_results: usize,
+    configured_paths: &[String],
+) -> Result<Vec<ContextHit>, String> {
+    let mut roots = configured_paths
+        .iter()
+        .map(|value| Path::new(value))
+        .filter(|path| path.exists())
+        .map(|path| path.to_path_buf())
+        .collect::<Vec<_>>();
+
+    if roots.is_empty() {
+        if let Ok(home) = std::env::var("HOME") {
+            let fallback = Path::new(&home).join(".deepseek").join("knowledge-base");
+            if fallback.exists() {
+                roots.push(fallback);
+            }
+        }
+    }
+
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let tokens = normalize_query_tokens(query);
+    let mut hits = Vec::new();
+    for root in roots {
+        let root = match std::fs::canonicalize(&root) {
+            Ok(root) => root,
+            Err(_) => continue,
+        };
+
+        if root.is_file() {
+            if let Some(hit) = scan_knowledge_base_file(&root, &root, &tokens).await {
+                hits.push(hit);
+            }
+            continue;
+        }
+
+        for entry in WalkDir::new(&root)
+            .into_iter()
+            .filter_entry(|entry| !is_ignored(entry.path()))
+            .filter_map(|entry| entry.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            if let Some(hit) = scan_knowledge_base_file(entry.path(), &root, &tokens).await {
+                hits.push(hit);
+            }
+
+            if hits.len() >= max_results.saturating_mul(3) {
+                break;
+            }
+        }
+    }
+
+    hits.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(Ordering::Equal)
+    });
+    hits.truncate(max_results.saturating_mul(2));
+    Ok(hits)
+}
+
+async fn scan_knowledge_base_file(
+    path: &Path,
+    root: &Path,
+    tokens: &[String],
+) -> Option<ContextHit> {
+    if !matches_knowledge_base_kind(path) {
+        return None;
+    }
+
+    let content = read_knowledge_base_content(path).await.ok()?;
+    let display_path = path
+        .strip_prefix(root)
+        .ok()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    let (snippet, confidence) = match_content(&display_path, &content, tokens)?;
+    Some(ContextHit {
+        source_type: "user_knowledge_base".into(),
+        title: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(&display_path)
+            .to_string(),
+        location: path.to_string_lossy().to_string(),
+        snippet,
+        confidence,
+        freshness: "local_knowledge_base".into(),
+        next_hint: display_path,
+    })
+}
+
+async fn read_knowledge_base_content(path: &Path) -> Result<String, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if extension == "pdf" {
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|error| format!("read pdf bytes failed: {}", error))?;
+        return Ok(String::from_utf8_lossy(&bytes).to_string());
+    }
+
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|error| format!("read knowledge base file failed: {}", error))
+}
+
+async fn search_web_context(
+    config: Option<&ApiConfig>,
+    query: &str,
+    max_results: usize,
+) -> Result<(Vec<ContextHit>, Vec<LlmDebugResponse>), String> {
+    let config = config.ok_or_else(|| "web search config unavailable".to_string())?;
+    let messages = vec![
+        json!({
+            "role": "system",
+            "content": "You are DeepSeekX web retrieval. Search the live web and return only JSON. Preferred shape: {\"hits\":[{\"title\":\"...\",\"url\":\"https://...\",\"snippet\":\"...\"}]}. Keep snippets concise and factual."
+        }),
+        json!({
+            "role": "user",
+            "content": format!(
+                "Search the web for: {}. Return at most {} hits as JSON only.",
+                query, max_results
+            )
+        }),
+    ];
+
+    let response = api::chat_completion_with_debug(config, messages, true).await?;
+    let mut hits = parse_web_search_blocks(&response.content, max_results);
+    if hits.is_empty() {
+        let raw_text = api::extract_text(&response.content);
+        hits = parse_web_search_text(&raw_text, max_results)?;
+    }
+
+    Ok((hits, vec![response.debug]))
+}
+
+fn parse_web_search_blocks(content: &Value, max_results: usize) -> Vec<ContextHit> {
+    let Some(blocks) = content.as_array() else {
+        return Vec::new();
+    };
+
+    blocks
+        .iter()
+        .filter_map(|block| {
+            if block.get("type").and_then(|value| value.as_str()) != Some("search_result") {
+                return None;
+            }
+
+            let url = block.get("url").and_then(|value| value.as_str())?;
+            let title = block
+                .get("title")
+                .and_then(|value| value.as_str())
+                .unwrap_or(url);
+            let snippet = block
+                .get("content")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+
+            Some(ContextHit {
+                source_type: "web_search".into(),
+                title: title.to_string(),
+                location: url.to_string(),
+                snippet: truncate(snippet, MAX_SNIPPET_CHARS),
+                confidence: 3.0,
+                freshness: "live_web".into(),
+                next_hint: url.to_string(),
+            })
+        })
+        .take(max_results)
+        .collect()
+}
+
+fn parse_web_search_text(raw_text: &str, max_results: usize) -> Result<Vec<ContextHit>, String> {
+    let candidate = strip_code_fence(raw_text).trim();
+    let value: Value = serde_json::from_str(candidate)
+        .map_err(|error| format!("web search json parse failed: {}", error))?;
+
+    let items = match &value {
+        Value::Array(items) => items.clone(),
+        Value::Object(object) => object
+            .get("hits")
+            .and_then(|hits| hits.as_array())
+            .cloned()
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+
+    Ok(items
+        .into_iter()
+        .filter_map(|item| {
+            let url = item.get("url").and_then(|value| value.as_str())?;
+            let title = item
+                .get("title")
+                .and_then(|value| value.as_str())
+                .unwrap_or(url);
+            let snippet = item
+                .get("snippet")
+                .or_else(|| item.get("content"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+
+            Some(ContextHit {
+                source_type: "web_search".into(),
+                title: title.to_string(),
+                location: url.to_string(),
+                snippet: truncate(snippet, MAX_SNIPPET_CHARS),
+                confidence: 2.5,
+                freshness: "live_web".into(),
+                next_hint: url.to_string(),
+            })
+        })
+        .take(max_results)
+        .collect())
+}
+
 fn expand_sources(preferred_sources: Option<&[ContextSource]>) -> Vec<ContextSource> {
     if let Some(preferred_sources) = preferred_sources {
         if !preferred_sources.is_empty() {
@@ -156,8 +407,8 @@ fn matches_source_kind(path: &str, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Code => {
             let code_exts = [
-                "rs", "ts", "tsx", "js", "jsx", "json", "toml", "yaml", "yml", "go", "py",
-                "sh", "css", "html", "mdx",
+                "rs", "ts", "tsx", "js", "jsx", "json", "toml", "yaml", "yml", "go", "py", "sh",
+                "css", "html", "mdx",
             ];
             code_exts.contains(&extension.as_str())
                 && !path.starts_with("docs/")
@@ -170,6 +421,19 @@ fn matches_source_kind(path: &str, kind: SourceKind) -> bool {
                 || extension == "txt"
         }
     }
+}
+
+fn matches_knowledge_base_kind(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    matches!(
+        extension.as_str(),
+        "md" | "markdown" | "txt" | "html" | "htm" | "json" | "mdx" | "csv" | "pdf"
+    )
 }
 
 fn match_content(path: &str, content: &str, tokens: &[String]) -> Option<(String, f32)> {
@@ -254,7 +518,11 @@ fn snippet_around(content_lc: &str, content: &str, token: &str) -> String {
             .chars()
             .count()
             .saturating_sub(MAX_SNIPPET_CHARS / 3);
-        let snippet: String = content.chars().skip(start).take(MAX_SNIPPET_CHARS).collect();
+        let snippet: String = content
+            .chars()
+            .skip(start)
+            .take(MAX_SNIPPET_CHARS)
+            .collect();
         truncate(&snippet, MAX_SNIPPET_CHARS)
     } else {
         truncate(content, MAX_SNIPPET_CHARS)
@@ -277,10 +545,25 @@ fn truncate(value: &str, max_chars: usize) -> String {
     }
 }
 
+fn strip_code_fence(raw_text: &str) -> &str {
+    let trimmed = raw_text.trim();
+    if let Some(stripped) = trimmed.strip_prefix("```json") {
+        return stripped.strip_suffix("```").unwrap_or(stripped).trim();
+    }
+    if let Some(stripped) = trimmed.strip_prefix("```") {
+        return stripped.strip_suffix("```").unwrap_or(stripped).trim();
+    }
+    trimmed
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{normalize_query_tokens, retrieve_context, ContextHit};
+    use super::{
+        normalize_query_tokens, parse_web_search_blocks, parse_web_search_text, retrieve_context,
+        ContextHit,
+    };
     use crate::agent::actions::{ContextSource, RetrievalIntent};
+    use serde_json::json;
     use std::fs;
     use uuid::Uuid;
 
@@ -293,7 +576,10 @@ mod tests {
     #[test]
     fn tokenizes_query_into_search_terms() {
         let tokens = normalize_query_tokens("agent orchestrator planner permissions");
-        assert_eq!(tokens, vec!["agent", "orchestrator", "planner", "permissions"]);
+        assert_eq!(
+            tokens,
+            vec!["agent", "orchestrator", "planner", "permissions"]
+        );
     }
 
     #[tokio::test]
@@ -313,11 +599,13 @@ mod tests {
         .unwrap();
 
         let response = retrieve_context(
+            None,
             &workspace.to_string_lossy(),
             "planner orchestrator",
             &RetrievalIntent::UnderstandExistingSystem,
             Some(&[ContextSource::WorkspaceCode, ContextSource::WorkspaceDocs]),
             8,
+            &[],
         )
         .await
         .unwrap();
@@ -348,5 +636,69 @@ mod tests {
         };
         let raw = serde_json::to_string(&hit).unwrap();
         assert!(raw.contains("workspace_code"));
+    }
+
+    #[test]
+    fn parses_web_search_json_text() {
+        let hits = parse_web_search_text(
+            r#"{"hits":[{"title":"DeepSeekX","url":"https://example.com/deepseekx","snippet":"Latest project update"}]}"#,
+            4,
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].location, "https://example.com/deepseekx");
+        assert_eq!(hits[0].source_type, "web_search");
+    }
+
+    #[test]
+    fn parses_web_search_blocks() {
+        let hits = parse_web_search_blocks(
+            &json!([
+                {
+                    "type": "search_result",
+                    "title": "DeepSeekX docs",
+                    "url": "https://example.com/docs",
+                    "content": "Docs snippet"
+                }
+            ]),
+            4,
+        );
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "DeepSeekX docs");
+        assert_eq!(hits[0].next_hint, "https://example.com/docs");
+    }
+
+    #[tokio::test]
+    async fn retrieves_hits_from_user_knowledge_base() {
+        let workspace = make_temp_dir();
+        let knowledge_base = make_temp_dir();
+        fs::write(
+            knowledge_base.join("reference.md"),
+            "DeepSeekX backlog notes about retrieval sources and planner behavior.",
+        )
+        .unwrap();
+
+        let response = retrieve_context(
+            None,
+            &workspace.to_string_lossy(),
+            "retrieval planner",
+            &RetrievalIntent::FindDocumentation,
+            Some(&[ContextSource::UserKnowledgeBase]),
+            8,
+            &[knowledge_base.to_string_lossy().to_string()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.unavailable_sources.len(), 0);
+        assert!(response
+            .hits
+            .iter()
+            .any(|hit| hit.source_type == "user_knowledge_base"));
+
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(knowledge_base).unwrap();
     }
 }

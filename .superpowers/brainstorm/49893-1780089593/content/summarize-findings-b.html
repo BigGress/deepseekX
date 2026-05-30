@@ -1,0 +1,81 @@
+<h2>`summarize_findings` 展示优化</h2>
+<p class="subtitle">你更在意 B，所以这一步只聚焦：如何让“整理结果”不再把过程内容放大</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">当前问题</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">Execution Detail（展开后）</div>
+        <div class="placeholder" style="padding:16px; line-height:1.6;">
+          summarize_findings<br />
+          结果：聚焦主题 + 大段整理正文 + retrieval 明细<br />
+          预览：又重复一遍命中来源和摘要
+        </div>
+      </div>
+      <div class="pros-cons">
+        <div class="cons">
+          <h4>问题</h4>
+          <ul>
+            <li>“整理结果”本应是二次提炼，却把过程明细带回来了</li>
+            <li>它和 `retrieve_context` 卡片内容重复</li>
+            <li>展开后噪音大于信息增量</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">推荐状态</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">Execution Detail（默认折叠）</div>
+        <div class="placeholder" style="padding:16px; line-height:1.7;">
+          查看执行过程 ▼<br /><br />
+          展开后：<br />
+          summarize_findings<br />
+          <strong>摘要：</strong>已整理研究简报，提炼为 4 个结论<br />
+          <strong>正文：</strong>点击本卡片内二级展开后查看
+        </div>
+      </div>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>规则</h4>
+          <ul>
+            <li>默认只显示 1 行摘要</li>
+            <li>正文允许展开查看</li>
+            <li>正文只保留整理后的研究简报，不再混入 retrieval 明细</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>建议的数据处理方式</h3>
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>拆分摘要与正文</h3>
+        <p>`ExecutionCard` 默认只显示 `summary`；`result_summary` 放进二级折叠正文。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>限制 summarize_findings 内容源</h3>
+        <p>这一步生成的正文只允许是提炼结果，不允许再拼入 retrieval 原始命中。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>执行区两级折叠</h3>
+        <p>一级折叠整个 Execution，二级折叠 `summarize_findings` 正文。</p>
+      </div>
+    </div>
+  </div>
+</div>

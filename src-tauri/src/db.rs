@@ -37,6 +37,7 @@ impl Database {
                 pinned_files TEXT NOT NULL DEFAULT '',
                 skills      TEXT NOT NULL DEFAULT '[]',
                 mcp_servers TEXT NOT NULL DEFAULT '[]',
+                retrieval_sources TEXT NOT NULL DEFAULT '[\"workspace_code\",\"workspace_docs\",\"user_knowledge_base\",\"web_search\"]',
                 created_at  INTEGER NOT NULL,
                 updated_at  INTEGER NOT NULL
             );
@@ -68,7 +69,9 @@ impl Database {
 
         // 兼容已有数据库：检查 pinned_files 列是否存在，不存在则添加
         let has_column: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='pinned_files'")?
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='pinned_files'",
+            )?
             .query_row([], |row| row.get::<_, i64>(0))
             .map(|n| n > 0)?;
         if !has_column {
@@ -77,8 +80,16 @@ impl Database {
             )?;
         }
 
-        // 兼容已有数据库：检查 skills / mcp_servers 列是否存在
-        for col in &["skills", "mcp_servers"] {
+        // 兼容已有数据库：检查 skills / mcp_servers / retrieval_sources 列是否存在
+        let project_columns = [
+            ("skills", "'[]'"),
+            ("mcp_servers", "'[]'"),
+            (
+                "retrieval_sources",
+                "'[\"workspace_code\",\"workspace_docs\",\"user_knowledge_base\",\"web_search\"]'",
+            ),
+        ];
+        for (col, default_value) in &project_columns {
             let has: bool = conn
                 .prepare(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='{}'",
@@ -88,8 +99,8 @@ impl Database {
                 .map(|n| n > 0)?;
             if !has {
                 conn.execute_batch(&format!(
-                    "ALTER TABLE projects ADD COLUMN {} TEXT NOT NULL DEFAULT '[]';",
-                    col
+                    "ALTER TABLE projects ADD COLUMN {} TEXT NOT NULL DEFAULT {};",
+                    col, default_value
                 ))?;
             }
         }
@@ -110,13 +121,14 @@ impl Database {
         pinned_files: &str,
         skills: &str,
         mcp_servers: &str,
+        retrieval_sources: &str,
     ) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
-            "INSERT INTO projects (id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, now, now],
+            "INSERT INTO projects (id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, retrieval_sources, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, retrieval_sources, now, now],
         )?;
         Ok(())
     }
@@ -124,7 +136,7 @@ impl Database {
     pub fn list_projects(&self) -> SqliteResult<Vec<ProjectRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, created_at, updated_at
+            "SELECT id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, retrieval_sources, created_at, updated_at
              FROM projects ORDER BY updated_at DESC",
         )?;
         let rows = stmt
@@ -139,8 +151,9 @@ impl Database {
                     pinned_files: row.get(6)?,
                     skills: row.get(7)?,
                     mcp_servers: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    retrieval_sources: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })?
             .collect::<SqliteResult<Vec<_>>>()?;
@@ -150,7 +163,7 @@ impl Database {
     pub fn get_project(&self, id: &str) -> SqliteResult<Option<ProjectRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, created_at, updated_at
+            "SELECT id, name, description, root_path, instructions, model, pinned_files, skills, mcp_servers, retrieval_sources, created_at, updated_at
              FROM projects WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(rusqlite::params![id], |row| {
@@ -164,8 +177,9 @@ impl Database {
                 pinned_files: row.get(6)?,
                 skills: row.get(7)?,
                 mcp_servers: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                retrieval_sources: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
         Ok(rows.next().transpose()?)
@@ -181,12 +195,13 @@ impl Database {
         pinned_files: &str,
         skills: &str,
         mcp_servers: &str,
+        retrieval_sources: &str,
     ) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
-            "UPDATE projects SET name=?1, description=?2, instructions=?3, model=?4, pinned_files=?5, skills=?6, mcp_servers=?7, updated_at=?8 WHERE id=?9",
-            rusqlite::params![name, description, instructions, model, pinned_files, skills, mcp_servers, now, id],
+            "UPDATE projects SET name=?1, description=?2, instructions=?3, model=?4, pinned_files=?5, skills=?6, mcp_servers=?7, retrieval_sources=?8, updated_at=?9 WHERE id=?10",
+            rusqlite::params![name, description, instructions, model, pinned_files, skills, mcp_servers, retrieval_sources, now, id],
         )?;
         Ok(())
     }
@@ -199,12 +214,7 @@ impl Database {
 
     // ---------- Conversation CRUD ----------
 
-    pub fn create_conversation(
-        &self,
-        id: &str,
-        project_id: &str,
-        title: &str,
-    ) -> SqliteResult<()> {
+    pub fn create_conversation(&self, id: &str, project_id: &str, title: &str) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
@@ -234,7 +244,10 @@ impl Database {
 
     pub fn delete_conversation(&self, id: &str) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM conversations WHERE id = ?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM conversations WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
@@ -317,6 +330,7 @@ pub struct ProjectRow {
     pub pinned_files: String,
     pub skills: String,
     pub mcp_servers: String,
+    pub retrieval_sources: String,
     pub created_at: i64,
     pub updated_at: i64,
 }

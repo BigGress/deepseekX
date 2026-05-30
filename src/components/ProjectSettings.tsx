@@ -2,6 +2,34 @@ import { useState, useEffect } from "react";
 import type { FileNode, ProjectRow, SkillInfo } from "../types";
 import { listAvailableSkills, listAvailableMcpServers } from "../api";
 
+const RETRIEVAL_SOURCES = [
+  {
+    name: "workspace_code",
+    label: "工作区代码",
+    description: "检索当前项目里的源码、配置和脚本文件",
+  },
+  {
+    name: "workspace_docs",
+    label: "工作区文档",
+    description: "检索 docs、README 和本地说明文档",
+  },
+  {
+    name: "user_knowledge_base",
+    label: "用户知识库",
+    description: "检索应用设置里配置的外部知识库路径",
+  },
+  {
+    name: "web_search",
+    label: "联网搜索",
+    description: "允许查询实时网页信息和外部资料",
+  },
+] as const;
+
+const BROWSER_SKILL_KEYWORDS = ["browser", "agent-browser", "chrome"];
+const BROWSER_MCP_KEYWORDS = ["browser", "chrome", "playwright", "puppeteer"];
+const DESKTOP_SKILL_KEYWORDS = ["computer-use"];
+const DESKTOP_MCP_KEYWORDS = ["computer", "desktop", "macos", "ui"];
+
 interface ProjectSettingsProps {
   open: boolean;
   project: ProjectRow;
@@ -15,6 +43,7 @@ interface ProjectSettingsProps {
     pinnedFiles: string,
     skills: string,
     mcpServers: string,
+    retrievalSources: string,
   ) => void;
 }
 
@@ -40,6 +69,9 @@ export default function ProjectSettings({
   const [selectedMcp, setSelectedMcp] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(project.mcp_servers || "[]")); } catch { return new Set(); }
   });
+  const [selectedRetrievalSources, setSelectedRetrievalSources] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(project.retrieval_sources || "[]")); } catch { return new Set(); }
+  });
 
   useEffect(() => {
     if (open) {
@@ -50,6 +82,7 @@ export default function ProjectSettings({
       setPinnedFiles(project.pinned_files ? project.pinned_files.split(",").filter(Boolean) : []);
       try { setSelectedSkills(new Set(JSON.parse(project.skills || "[]"))); } catch { setSelectedSkills(new Set()); }
       try { setSelectedMcp(new Set(JSON.parse(project.mcp_servers || "[]"))); } catch { setSelectedMcp(new Set()); }
+      try { setSelectedRetrievalSources(new Set(JSON.parse(project.retrieval_sources || "[]"))); } catch { setSelectedRetrievalSources(new Set()); }
       listAvailableSkills().then(setAvailableSkills).catch(() => {});
       listAvailableMcpServers().then(setAvailableMcp).catch(() => {});
     }
@@ -73,11 +106,39 @@ export default function ProjectSettings({
       pinnedFiles.join(","),
       JSON.stringify([...selectedSkills]),
       JSON.stringify([...selectedMcp]),
+      JSON.stringify([...selectedRetrievalSources]),
     );
     onClose();
   };
 
   const allFiles = flattenFilePaths(fileNodes);
+  const knownSkillNames = Array.from(new Set([
+    ...availableSkills.map((sk) => sk.name),
+    ...selectedSkills,
+  ]));
+  const knownMcpNames = Array.from(new Set([
+    ...availableMcp,
+    ...selectedMcp,
+  ]));
+  const browserSkills = knownSkillNames
+    .filter((name) => containsAnyKeyword(name, BROWSER_SKILL_KEYWORDS));
+  const browserMcp = knownMcpNames.filter((name) => containsAnyKeyword(name, BROWSER_MCP_KEYWORDS));
+  const desktopSkills = knownSkillNames
+    .filter((name) => containsAnyKeyword(name, DESKTOP_SKILL_KEYWORDS));
+  const desktopMcp = knownMcpNames.filter((name) => containsAnyKeyword(name, DESKTOP_MCP_KEYWORDS));
+
+  const enableCapability = (skillsToEnable: string[], mcpToEnable: string[]) => {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      skillsToEnable.forEach((name) => next.add(name));
+      return next;
+    });
+    setSelectedMcp((prev) => {
+      const next = new Set(prev);
+      mcpToEnable.forEach((name) => next.add(name));
+      return next;
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -198,6 +259,71 @@ export default function ProjectSettings({
             </div>
           )}
 
+          {(browserSkills.length > 0 || browserMcp.length > 0 || desktopSkills.length > 0 || desktopMcp.length > 0) && (
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1.5">
+                Automation Capabilities（一键启用浏览器/桌面自动化相关能力）
+              </label>
+              <div className="space-y-2">
+                <CapabilityCard
+                  title="浏览器自动化"
+                  description="适合页面导航、抓取、UI 验证。建议同时启用相关 skill 和 MCP server。"
+                  skills={browserSkills}
+                  mcpServers={browserMcp}
+                  enabledSkills={[...selectedSkills].filter((name) => browserSkills.includes(name))}
+                  enabledMcp={[...selectedMcp].filter((name) => browserMcp.includes(name))}
+                  onEnable={() => enableCapability(browserSkills, browserMcp)}
+                />
+                <CapabilityCard
+                  title="桌面自动化"
+                  description="适合原生应用交互、Computer Use、非工作区文件系统之外的桌面操作。"
+                  skills={desktopSkills}
+                  mcpServers={desktopMcp}
+                  enabledSkills={[...selectedSkills].filter((name) => desktopSkills.includes(name))}
+                  enabledMcp={[...selectedMcp].filter((name) => desktopMcp.includes(name))}
+                  onEnable={() => enableCapability(desktopSkills, desktopMcp)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-neutral-400 mb-1.5">
+              Retrieval Sources（控制这个项目允许使用哪些检索来源）
+            </label>
+            <div className="bg-neutral-850 border border-neutral-700 rounded-md overflow-hidden">
+              {RETRIEVAL_SOURCES.map((source) => (
+                <label
+                  key={source.name}
+                  className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-neutral-800 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedRetrievalSources.has(source.name)}
+                    onChange={() => {
+                      const next = new Set(selectedRetrievalSources);
+                      if (next.has(source.name)) {
+                        if (next.size === 1) return;
+                        next.delete(source.name);
+                      } else {
+                        next.add(source.name);
+                      }
+                      setSelectedRetrievalSources(next);
+                    }}
+                    className="mt-0.5 rounded bg-neutral-700 border-neutral-600 text-blue-600 focus:ring-0 cursor-pointer"
+                  />
+                  <span className="min-w-0">
+                    <span className="block font-medium text-neutral-300">{source.label}</span>
+                    <span className="block text-neutral-600">{source.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-neutral-600">
+              至少保留一个来源。关闭 `联网搜索` 后，Agent 和普通 Chat 都会按本地模式运行。
+            </p>
+          </div>
+
           {/* MCP */}
           {availableMcp.length > 0 && (
             <div>
@@ -232,6 +358,64 @@ export default function ProjectSettings({
             保存
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function containsAnyKeyword(value: string, keywords: string[]) {
+  const normalized = value.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function CapabilityCard({
+  title,
+  description,
+  skills,
+  mcpServers,
+  enabledSkills,
+  enabledMcp,
+  onEnable,
+}: {
+  title: string;
+  description: string;
+  skills: string[];
+  mcpServers: string[];
+  enabledSkills: string[];
+  enabledMcp: string[];
+  onEnable: () => void;
+}) {
+  const hasAnything = skills.length > 0 || mcpServers.length > 0;
+  const fullyEnabled = enabledSkills.length === skills.length && enabledMcp.length === mcpServers.length && hasAnything;
+
+  return (
+    <div className="rounded-md border border-neutral-700 bg-neutral-850 px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-neutral-200">{title}</p>
+          <p className="mt-1 text-xs text-neutral-500">{description}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onEnable}
+          disabled={!hasAnything || fullyEnabled}
+          className="shrink-0 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {fullyEnabled ? "已启用" : "一键启用"}
+        </button>
+      </div>
+      <div className="mt-3 space-y-1 text-xs">
+        <p className="text-neutral-400">
+          Skills: {skills.length > 0 ? skills.join(", ") : "未检测到"}
+        </p>
+        <p className="text-neutral-400">
+          MCP Servers: {mcpServers.length > 0 ? mcpServers.join(", ") : "未检测到"}
+        </p>
+        {(enabledSkills.length > 0 || enabledMcp.length > 0) && (
+          <p className="text-emerald-300">
+            当前已启用: {[...enabledSkills, ...enabledMcp].join(", ")}
+          </p>
+        )}
       </div>
     </div>
   );

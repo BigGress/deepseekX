@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::fs::{create_dir_all, OpenOptions};
+use std::io::Write;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crate::agent::permissions::resolve_workspace_path;
 
@@ -13,6 +17,8 @@ struct DeepSeekConfig {
     default_text_model: Option<String>,
     #[serde(default)]
     providers: Providers,
+    #[serde(default)]
+    mcp: McpConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -23,6 +29,29 @@ struct Providers {
 #[derive(Debug, Deserialize)]
 struct ProviderConfig {
     api_key: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct McpConfig {
+    #[serde(default)]
+    servers: BTreeMap<String, McpServerTomlConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct McpServerTomlConfig {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 fn load_config() -> Result<DeepSeekConfig, String> {
@@ -83,6 +112,36 @@ pub struct ApiConfig {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmRequestLogEntry {
+    timestamp: String,
+    request_id: String,
+    endpoint: String,
+    model: String,
+    web_search_enabled: bool,
+    request_body: serde_json::Value,
+    status_code: Option<u16>,
+    duration_ms: u128,
+    success: bool,
+    error: Option<String>,
+    response_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmDebugResponse {
+    pub request_id: String,
+    pub endpoint: String,
+    pub model: String,
+    pub web_search_enabled: bool,
+    pub duration_ms: u128,
+    pub response_text: String,
+}
+
+pub struct ChatCompletionResult {
+    pub content: Value,
+    pub debug: LlmDebugResponse,
+}
+
 // ---------- API 请求/响应 ----------
 
 #[derive(Debug, Serialize)]
@@ -123,6 +182,16 @@ pub async fn chat_completion_with_options(
     messages: Vec<Value>,
     web_search_enabled: bool,
 ) -> Result<Value, String> {
+    chat_completion_with_debug(config, messages, web_search_enabled)
+        .await
+        .map(|result| result.content)
+}
+
+pub async fn chat_completion_with_debug(
+    config: &ApiConfig,
+    messages: Vec<Value>,
+    web_search_enabled: bool,
+) -> Result<ChatCompletionResult, String> {
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
     let api_messages: Vec<Message> = messages
@@ -144,6 +213,10 @@ pub async fn chat_completion_with_options(
             None
         },
     };
+    let request_body =
+        serde_json::to_value(&body).unwrap_or_else(|_| serde_json::json!({"serialize_error": true}));
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let started_at = Instant::now();
 
     let client = reqwest::Client::new();
     let resp = client
@@ -152,31 +225,201 @@ pub async fn chat_completion_with_options(
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
-        .await
-        .map_err(|e| format!("API 请求失败: {}", e))?;
+        .await;
+
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(error) => {
+            append_llm_log(LlmRequestLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                request_id,
+                endpoint: url,
+                model: config.model.clone(),
+                web_search_enabled,
+                request_body,
+                status_code: None,
+                duration_ms: started_at.elapsed().as_millis(),
+                success: false,
+                error: Some(format!("API 请求失败: {}", error)),
+                response_text: None,
+            });
+            return Err(format!("API 请求失败: {}", error));
+        }
+    };
 
     let status = resp.status();
-    let resp_text = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let status_code = status.as_u16();
+    let resp_text_result = resp
+        .text()
+        .await;
+
+    let resp_text = match resp_text_result {
+        Ok(resp_text) => resp_text,
+        Err(error) => {
+            append_llm_log(LlmRequestLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                request_id,
+                endpoint: url,
+                model: config.model.clone(),
+                web_search_enabled,
+                request_body,
+                status_code: Some(status_code),
+                duration_ms: started_at.elapsed().as_millis(),
+                success: false,
+                error: Some(format!("读取响应失败: {}", error)),
+                response_text: None,
+            });
+            return Err(format!("读取响应失败: {}", error));
+        }
+    };
 
     if !status.is_success() {
+        append_llm_log(LlmRequestLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            request_id,
+            endpoint: url,
+            model: config.model.clone(),
+            web_search_enabled,
+            request_body,
+            status_code: Some(status_code),
+            duration_ms: started_at.elapsed().as_millis(),
+            success: false,
+            error: Some(format!("API 返回错误 ({})", status)),
+            response_text: Some(resp_text.clone()),
+        });
         return Err(format!("API 返回错误 ({}): {}", status, resp_text));
     }
 
-    let chat_resp: ChatResponse =
-        serde_json::from_str(&resp_text).map_err(|e| format!("解析响应失败: {}", e))?;
+    let chat_resp: ChatResponse = match serde_json::from_str(&resp_text) {
+        Ok(chat_resp) => chat_resp,
+        Err(error) => {
+            append_llm_log(LlmRequestLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                request_id,
+                endpoint: url,
+                model: config.model.clone(),
+                web_search_enabled,
+                request_body,
+                status_code: Some(status_code),
+                duration_ms: started_at.elapsed().as_millis(),
+                success: false,
+                error: Some(format!("解析响应失败: {}", error)),
+                response_text: Some(resp_text.clone()),
+            });
+            return Err(format!("解析响应失败: {}", error));
+        }
+    };
 
-    chat_resp
+    let content = chat_resp
         .choices
         .first()
         .map(|choice| choice.message.content.clone())
-        .ok_or_else(|| "API 返回空响应".to_string())
+        .ok_or_else(|| "API 返回空响应".to_string());
+
+    match content {
+        Ok(content) => {
+            append_llm_log(LlmRequestLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                request_id: request_id.clone(),
+                endpoint: url.clone(),
+                model: config.model.clone(),
+                web_search_enabled,
+                request_body,
+                status_code: Some(status_code),
+                duration_ms: started_at.elapsed().as_millis(),
+                success: true,
+                error: None,
+                response_text: Some(resp_text.clone()),
+            });
+            Ok(ChatCompletionResult {
+                content,
+                debug: LlmDebugResponse {
+                    request_id,
+                    endpoint: url,
+                    model: config.model.clone(),
+                    web_search_enabled,
+                    duration_ms: started_at.elapsed().as_millis(),
+                    response_text: resp_text,
+                },
+            })
+        }
+        Err(error) => {
+            append_llm_log(LlmRequestLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                request_id,
+                endpoint: url,
+                model: config.model.clone(),
+                web_search_enabled,
+                request_body,
+                status_code: Some(status_code),
+                duration_ms: started_at.elapsed().as_millis(),
+                success: false,
+                error: Some(error.clone()),
+                response_text: Some(resp_text),
+            });
+            Err(error)
+        }
+    }
 }
 
-pub async fn chat_completion(
-    config: &ApiConfig,
-    messages: Vec<Value>,
-) -> Result<Value, String> {
+pub async fn chat_completion(config: &ApiConfig, messages: Vec<Value>) -> Result<Value, String> {
     chat_completion_with_options(config, messages, true).await
+}
+
+pub fn read_llm_logs(limit: usize) -> Result<Vec<LlmRequestLogEntry>, String> {
+    let path = llm_log_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|error| format!("读取 LLM 日志失败: {}", error))?;
+    let mut entries: Vec<LlmRequestLogEntry> = content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<LlmRequestLogEntry>(line).ok())
+        .collect();
+    if limit > 0 && entries.len() > limit {
+        entries = entries.split_off(entries.len() - limit);
+    }
+    Ok(entries)
+}
+
+fn append_llm_log(entry: LlmRequestLogEntry) {
+    let Ok(path) = llm_log_path() else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let Ok(line) = serde_json::to_string(&entry) else {
+        return;
+    };
+    let _ = writeln!(file, "{line}");
+}
+
+fn llm_log_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "无法获取 HOME 目录".to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("com.deepseekx.desktop")
+                .join("logs")
+                .join("llm-requests.jsonl"),
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PathBuf::from(home).join(".deepseek").join("logs").join("llm-requests.jsonl"))
+    }
 }
 
 /// 从 ContentBlock 数组（Value 类型）提取纯文本
@@ -195,14 +438,16 @@ pub fn extract_text(content: &Value) -> String {
                             // 将搜索结果格式化为可读文本
                             let title = block.get("title").and_then(|v| v.as_str()).unwrap_or("");
                             let url = block.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                            let snippet = block.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                            let snippet =
+                                block.get("content").and_then(|v| v.as_str()).unwrap_or("");
                             Some(format!("🔍 [{}]({})\n{}", title, url, snippet))
                         }
                         "search" => {
                             // web_search 工具调用中的搜索结果
-                            block.get("content").and_then(|v| v.as_str()).map(|s| {
-                                format!("🌐 搜索结果:\n{}", s)
-                            })
+                            block
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .map(|s| format!("🌐 搜索结果:\n{}", s))
                         }
                         _ => None,
                     }
@@ -350,26 +595,31 @@ mod tests {
 
 /// 返回 config.toml 中定义的 MCP 服务器名称列表
 pub fn list_available_mcp_servers() -> Vec<String> {
-    let mut servers: Vec<String> = Vec::new();
+    load_config()
+        .map(|config| config.mcp.servers.into_keys().collect())
+        .unwrap_or_default()
+}
 
-    let home = match std::env::var("HOME") {
-        Ok(h) => h,
-        Err(_) => return servers,
-    };
+pub fn get_mcp_server_configs(selected_names: &[String]) -> Result<Vec<McpServerConfig>, String> {
+    let config = load_config()?;
+    let mut resolved = Vec::new();
 
-    let config_path = PathBuf::from(&home).join(".deepseek").join("config.toml");
-    if let Ok(content) = std::fs::read_to_string(&config_path) {
-        // 简单解析 [mcp.servers.xxx] 段中的服务器名称
-        for line in content.lines() {
-            let line = line.trim();
-            // 匹配 [mcp.servers.xxx] 格式
-            if line.starts_with("[mcp.servers.") && line.ends_with(']') {
-                let name = &line["[mcp.servers.".len()..line.len() - 1];
-                if !name.is_empty() {
-                    servers.push(name.to_string());
-                }
-            }
+    for name in selected_names {
+        let Some(server) = config.mcp.servers.get(name) else {
+            continue;
+        };
+        let command = server.command.trim();
+        if command.is_empty() {
+            continue;
         }
+
+        resolved.push(McpServerConfig {
+            name: name.clone(),
+            command: command.to_string(),
+            args: server.args.clone(),
+            env: server.env.clone(),
+        });
     }
-    servers
+
+    Ok(resolved)
 }
