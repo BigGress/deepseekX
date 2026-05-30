@@ -371,18 +371,121 @@ pub fn resolve_file_preview(
     })
 }
 
-// ─── Office stubs (replaced in Task 8) ───────────────────────────────────────
+// ─── xlsx via calamine ────────────────────────────────────────────────────────
 
-fn parse_xlsx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, PreviewMetadata), String> {
-    Ok((PreviewContent::Fallback { message: "XLSX 预览即将支持".to_string() }, PreviewMetadata::default()))
+fn parse_xlsx(path: &Path, warnings: &mut Vec<String>) -> Result<(PreviewContent, PreviewMetadata), String> {
+    use calamine::{open_workbook_auto, Data, Reader};
+
+    let mut wb = open_workbook_auto(path).map_err(|e| format!("读取 Excel 失败: {e}"))?;
+    let names = wb.sheet_names().to_vec();
+
+    let first = names.first().cloned().unwrap_or_default();
+    if names.len() > 1 {
+        warnings.push(format!("文件共 {} 个 Sheet，当前显示第一个：{}", names.len(), first));
+    }
+
+    let all_rows: Vec<Vec<String>> = wb
+        .worksheet_range(&first)
+        .map(|range| {
+            range
+                .rows()
+                .take(1001)
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| match cell {
+                            Data::Empty => String::new(),
+                            Data::String(s) => s.clone(),
+                            Data::Float(f) => f.to_string(),
+                            Data::Int(i) => i.to_string(),
+                            Data::Bool(b) => b.to_string(),
+                            Data::Error(e) => format!("{e:?}"),
+                            _ => String::new(),
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let (header, rows) = if all_rows.is_empty() {
+        (vec![], vec![])
+    } else {
+        let mut r = all_rows;
+        let h = r.remove(0);
+        (h, r)
+    };
+
+    if rows.len() >= 1000 {
+        warnings.push("数据行数超过 1000，已截断显示".to_string());
+    }
+
+    let meta = PreviewMetadata { sheet_names: Some(names), ..Default::default() };
+    Ok((PreviewContent::Table { columns: header, rows }, meta))
 }
 
-fn parse_docx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
-    Ok((PreviewContent::Fallback { message: "DOCX 预览即将支持".to_string() }, None))
+// ─── docx / pptx via zip + XML text extraction ────────────────────────────────
+
+fn extract_xml_text(xml: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut prev_space = true;
+    for ch in xml.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => { in_tag = false; }
+            _ if !in_tag => {
+                if ch.is_whitespace() {
+                    if !prev_space { out.push(' '); prev_space = true; }
+                } else {
+                    out.push(ch);
+                    prev_space = false;
+                }
+            }
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }
 
-fn parse_pptx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
-    Ok((PreviewContent::Fallback { message: "PPTX 预览即将支持".to_string() }, None))
+fn read_zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
+    let mut entry = archive.by_name(name).ok()?;
+    let mut buf = String::new();
+    entry.read_to_string(&mut buf).ok()?;
+    Some(buf)
+}
+
+fn parse_docx(path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取 DOCX 失败: {e}"))?;
+    let xml = read_zip_entry(&mut archive, "word/document.xml")
+        .ok_or_else(|| "无效 DOCX：缺少 word/document.xml".to_string())?;
+    let text = extract_xml_text(&xml);
+    Ok((PreviewContent::Markdown { markdown: text }, None))
+}
+
+fn parse_pptx(path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取 PPTX 失败: {e}"))?;
+
+    let mut slides = Vec::new();
+    let mut idx = 1usize;
+    loop {
+        let name = format!("ppt/slides/slide{idx}.xml");
+        match read_zip_entry(&mut archive, &name) {
+            Some(xml) => {
+                let text = extract_xml_text(&xml);
+                if !text.trim().is_empty() {
+                    slides.push(format!("## 第 {idx} 页\n\n{}", text.trim()));
+                }
+                idx += 1;
+            }
+            None => break,
+        }
+    }
+
+    let page_count = slides.len() as u32;
+    let meta = PreviewMetadata { page_count: Some(page_count), ..Default::default() };
+    Ok((PreviewContent::Markdown { markdown: slides.join("\n\n---\n\n") }, Some(meta)))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -482,5 +585,12 @@ mod tests {
         let result = resolve_file_preview("index.html".to_string(), root.to_string_lossy().to_string(), "rendered".to_string()).unwrap();
         assert!(matches!(result.content, Some(PreviewContent::Html { sandboxed: true, .. })));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn extract_xml_text_strips_tags_and_collapses_whitespace() {
+        let xml = "<w:p><w:t>Hello</w:t> <w:t>World</w:t></w:p>";
+        let result = extract_xml_text(xml);
+        assert_eq!(result, "Hello World");
     }
 }
