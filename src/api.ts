@@ -10,6 +10,8 @@ import type {
   TurnBasedSession,
   SkillInfo,
   LlmRequestLogEntry,
+  PreviewDescriptor,
+  PreviewMode,
 } from "./types";
 
 // ---------- Project ----------
@@ -199,4 +201,21 @@ export async function listAvailableMcpServers(): Promise<string[]> {
 
 export async function readLlmLogs(limit = 20): Promise<LlmRequestLogEntry[]> {
   return invoke("read_llm_logs", { limit });
+}
+
+// ---------- Preview ----------
+
+export async function describeFilePreview(
+  path: string,
+  workspaceRoot: string,
+): Promise<PreviewDescriptor> {
+  return invoke("describe_file_preview", { path, workspaceRoot });
+}
+
+export async function resolveFilePreview(
+  path: string,
+  workspaceRoot: string,
+  mode: PreviewMode,
+): Promise<PreviewDescriptor> {
+  return invoke("resolve_file_preview", { path, workspaceRoot, mode });
 }
