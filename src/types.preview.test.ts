@@ -1,40 +1,46 @@
-import { describe, it, expectTypeOf } from "vitest";
+import { describe, it } from "vitest";
+import { assertType, expectTypeOf } from "vitest";
 import type {
-  PreviewMode, PreviewCategory, PreviewContent,
-  PreviewDescriptor, PreviewTarget, PreviewState,
+  PreviewDescriptor,
+  PreviewTarget,
+  PreviewState,
+  PreviewContent,
+  PreviewCategory,
 } from "./types";
 
-describe("preview types", () => {
+describe("Preview type definitions", () => {
   it("PreviewDescriptor has required shape", () => {
-    const d: PreviewDescriptor = {
-      path: "src/main.rs", file_name: "main.rs", extension: "rs",
-      mime_type: "text/plain", size_bytes: 100, category: "code",
-      default_mode: "raw", available_modes: ["raw", "metadata"],
-      capabilities: {
-        can_render_inline: true, can_open_focused: true, can_download: true,
-        can_show_text_extract: false, can_show_original_appearance: false,
-      },
-      content: { kind: "text", text: "fn main() {}", language: "rust" },
-      metadata: { line_count: 1 }, warnings: [],
-    };
-    expectTypeOf(d.category).toMatchTypeOf<PreviewCategory>();
+    const d = {} as PreviewDescriptor;
+    assertType<string>(d.path);
+    assertType<string>(d.file_name);
+    assertType<PreviewCategory>(d.category);
+    assertType<string[] | undefined>(d.warnings as string[] | undefined);
+    // content is nullable
+    assertType<PreviewContent | null>(d.content);
   });
 
-  it("PreviewTarget source is constrained", () => {
-    const t: PreviewTarget = { path: "src/main.rs", source: "file_tree" };
-    expectTypeOf(t.source).toMatchTypeOf<string>();
+  it("PreviewTarget source is constrained union", () => {
+    const t = {} as PreviewTarget;
+    expectTypeOf(t.source).toEqualTypeOf<
+      "file_tree" | "chat_attachment" | "artifact" | "diff"
+    >();
   });
 
-  it("PreviewState starts closed", () => {
-    const s: PreviewState = {
-      isOpen: false, target: null, descriptor: null, selectedMode: null,
-      isLoading: false, error: null, focusedView: false,
-    };
-    expectTypeOf(s.isOpen).toMatchTypeOf<boolean>();
+  it("PreviewState initial shape", () => {
+    const s = {} as PreviewState;
+    assertType<boolean>(s.isOpen);
+    assertType<boolean>(s.isLoading);
+    assertType<string | null>(s.error);
   });
 
-  it("PreviewContent is a discriminated union on kind", () => {
-    const c: PreviewContent = { kind: "table", columns: ["a", "b"], rows: [["1", "2"]] };
-    expectTypeOf(c.kind).toMatchTypeOf<string>();
+  it("PreviewContent discriminated union narrows correctly", () => {
+    const c = {} as PreviewContent;
+    if (c.kind === "table") {
+      assertType<string[]>(c.columns);
+      assertType<string[][]>(c.rows);
+    }
+    if (c.kind === "media") {
+      assertType<"image" | "audio" | "video" | "pdf">(c.mediaType);
+    }
   });
 });

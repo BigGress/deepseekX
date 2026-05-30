@@ -236,11 +236,11 @@ export type PreviewCategory =
   | "archive" | "binary" | "unknown";
 
 export interface PreviewCapabilities {
-  can_render_inline: boolean;
-  can_open_focused: boolean;
-  can_download: boolean;
-  can_show_text_extract: boolean;
-  can_show_original_appearance: boolean;
+  readonly can_render_inline: boolean;
+  readonly can_open_focused: boolean;
+  readonly can_download: boolean;
+  readonly can_show_text_extract: boolean;
+  readonly can_show_original_appearance: boolean;
 }
 
 export type PreviewContent =
@@ -248,19 +248,19 @@ export type PreviewContent =
   | { kind: "markdown"; markdown: string }
   | { kind: "html"; html: string; sandboxed: boolean }
   | { kind: "table"; columns: string[]; rows: string[][] }
-  | { kind: "media"; url: string; media_type: "image" | "audio" | "video" | "pdf" }
-  | { kind: "pages"; pages: Array<{ page: number; image_url: string }> }
+  | { kind: "media"; url: string; mediaType: "image" | "audio" | "video" | "pdf" }
+  | { kind: "pages"; pages: Array<{ page: number; imageUrl: string }> }
   | { kind: "fallback"; message: string };
 
 export interface PreviewMetadata {
-  detected_encoding?: string;
-  line_count?: number;
-  page_count?: number;
-  sheet_names?: string[];
-  width?: number;
-  height?: number;
-  duration_seconds?: number;
-  generated_by?: string;
+  readonly detected_encoding?: string;
+  readonly line_count?: number;
+  readonly page_count?: number;
+  readonly sheet_names?: string[];
+  readonly width?: number;
+  readonly height?: number;
+  readonly duration_seconds?: number;
+  readonly generated_by?: string;
 }
 
 export interface PreviewDescriptor {
