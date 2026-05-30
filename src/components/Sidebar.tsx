@@ -13,6 +13,8 @@ interface SidebarProps {
   onDelete: (id: string) => void;
   fileNodes: FileNode[];
   onSelectFile?: (path: string) => void;
+  onPreviewFile?: (path: string) => void;
+  previewPath?: string;
   projectName: string;
   onBackToProjects: () => void;
   onOpenSettings: () => void;
@@ -26,6 +28,8 @@ export default function Sidebar({
   onDelete,
   fileNodes,
   onSelectFile,
+  onPreviewFile,
+  previewPath,
   projectName,
   onBackToProjects,
   onOpenSettings,
@@ -65,7 +69,7 @@ export default function Sidebar({
         <div className="px-3 py-2 text-xs text-neutral-500 font-medium shrink-0 select-none">
           文件
         </div>
-        <FileTree nodes={fileNodes} onSelectFile={onSelectFile} />
+        <FileTree nodes={fileNodes} onSelectFile={onSelectFile} onPreviewFile={onPreviewFile} previewPath={previewPath} />
       </div>
 
       {/* 对话区域 */}

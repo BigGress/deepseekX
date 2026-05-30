@@ -16,6 +16,7 @@ import type {
   LlmRequestLogEntry,
   RequestAttachment,
   Turn,
+  PreviewTarget,
 } from "./types";
 import {
   listProjects,
@@ -33,6 +34,9 @@ import {
   runAgentTask,
   sendMessageViaApi,
 } from "./api";
+import { useFilePreview } from "./hooks/useFilePreview";
+import FilePreviewPanel from "./components/FilePreviewPanel";
+import FocusedPreviewOverlay from "./components/FocusedPreviewOverlay";
 
 // 从 ContentBlock 数组中提取纯文本
 function extractText(content: ContentBlock[] | string): string {
@@ -112,6 +116,20 @@ function App() {
   const [activeConvId, setActiveConvId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [fileNodes, setFileNodes] = useState<FileNode[]>([]);
+
+  const {
+    state: previewState,
+    openPreview,
+    switchMode: switchPreviewMode,
+    closePreview,
+    openFocused,
+    closeFocused,
+  } = useFilePreview();
+
+  const handlePreviewFile = useCallback((path: string) => {
+    const target: PreviewTarget = { path, source: "file_tree" };
+    openPreview(target, selectedProject?.root_path ?? "");
+  }, [openPreview, selectedProject]);
 
   const refreshLlmDebugEntries = useCallback(async () => {
     try {
@@ -577,7 +595,7 @@ function App() {
 
   // 已选择项目：显示工作区
   return (
-    <div className="flex h-screen w-screen bg-neutral-950">
+    <div className="flex h-screen w-screen bg-neutral-950 overflow-hidden">
       <Sidebar
         projectName={selectedProject.name}
         onBackToProjects={handleBackToProjects}
@@ -589,18 +607,31 @@ function App() {
         fileNodes={fileNodes}
         onSelectFile={handleSelectFile}
         onOpenSettings={() => setSettingsOpen(true)}
+        onPreviewFile={handlePreviewFile}
+        previewPath={previewState.target?.path}
       />
-      <ChatPanel
-        conversation={activeConversation ?? null}
-        isLoading={isLoading}
-        onSend={handleSend}
-        onAgentFollowUp={handleAgentFollowUp}
-        fileNodes={fileNodes}
-        skillNames={skillNamesFromProject}
-        mcpNames={mcpNamesFromProject}
-        debugLlmResponsesEnabled={debugLlmResponses}
-        llmDebugEntries={llmDebugEntries}
-      />
+      <div className="flex-1 flex overflow-hidden">
+        <ChatPanel
+          conversation={activeConversation ?? null}
+          isLoading={isLoading}
+          onSend={handleSend}
+          onAgentFollowUp={handleAgentFollowUp}
+          fileNodes={fileNodes}
+          skillNames={skillNamesFromProject}
+          mcpNames={mcpNamesFromProject}
+          debugLlmResponsesEnabled={debugLlmResponses}
+          llmDebugEntries={llmDebugEntries}
+        />
+        {previewState.isOpen && (
+          <FilePreviewPanel
+            state={previewState}
+            workspaceRoot={selectedProject?.root_path ?? ""}
+            onClose={closePreview}
+            onSwitchMode={switchPreviewMode}
+            onOpenFocused={openFocused}
+          />
+        )}
+      </div>
       <ProjectSettings
         open={settingsOpen}
         project={selectedProject}
@@ -608,6 +639,15 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         onSave={handleSaveSettings}
       />
+      {previewState.focusedView && previewState.descriptor && (
+        <FocusedPreviewOverlay
+          descriptor={previewState.descriptor}
+          selectedMode={previewState.selectedMode ?? previewState.descriptor.default_mode}
+          workspaceRoot={selectedProject?.root_path ?? ""}
+          onClose={closeFocused}
+          onSwitchMode={switchPreviewMode}
+        />
+      )}
     </div>
   );
 }
