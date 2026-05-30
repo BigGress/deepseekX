@@ -207,6 +207,184 @@ pub fn describe_file_preview(path: String, workspace_root: String) -> Result<Pre
     })
 }
 
+// ─── Content generation ───────────────────────────────────────────────────────
+
+const TEXT_LINE_LIMIT: usize = 5_000;
+const CSV_ROW_LIMIT: usize = 1_000;
+const TEXT_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
+
+fn parse_mode(s: &str) -> PreviewMode {
+    match s {
+        "structured" => PreviewMode::Structured,
+        "rendered"   => PreviewMode::Rendered,
+        "raw"        => PreviewMode::Raw,
+        _            => PreviewMode::Raw,
+    }
+}
+
+fn language_hint(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| match e {
+            "ts" | "tsx" => "typescript",
+            "js" | "jsx" => "javascript",
+            "rs" => "rust",
+            "py" => "python",
+            "go" => "go",
+            "sh" => "bash",
+            "json" => "json",
+            "yaml" | "yml" => "yaml",
+            "toml" => "toml",
+            "sql" => "sql",
+            "css" | "scss" => "css",
+            other => other,
+        }.to_string())
+}
+
+fn read_text(path: &Path, size: Option<u64>, warnings: &mut Vec<String>) -> Result<(String, PreviewMetadata), String> {
+    if size.unwrap_or(0) > TEXT_SIZE_LIMIT {
+        warnings.push(format!(
+            "文件较大（{:.1} MB），仅显示前 {} 行",
+            size.unwrap_or(0) as f64 / 1_048_576.0, TEXT_LINE_LIMIT,
+        ));
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let lines: Vec<&str> = raw.lines().collect();
+    let total = lines.len() as u64;
+    let text = if lines.len() > TEXT_LINE_LIMIT { lines[..TEXT_LINE_LIMIT].join("\n") } else { raw };
+    Ok((text, PreviewMetadata { line_count: Some(total), ..Default::default() }))
+}
+
+fn parse_csv(path: &Path, size: Option<u64>, warnings: &mut Vec<String>) -> Result<(PreviewContent, PreviewMetadata), String> {
+    if size.unwrap_or(0) > 10 * 1024 * 1024 {
+        warnings.push(format!("CSV 文件较大，仅加载前 {} 行", CSV_ROW_LIMIT));
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("读取 CSV 失败: {e}"))?;
+    let mut lines = raw.lines();
+    let header: Vec<String> = lines.next().unwrap_or("").split(',').map(|s| s.trim().to_string()).collect();
+    let rows: Vec<Vec<String>> = lines
+        .take(CSV_ROW_LIMIT)
+        .map(|line| line.split(',').map(|s| s.trim().to_string()).collect())
+        .collect();
+    let total = raw.lines().count().saturating_sub(1) as u64;
+    if total > CSV_ROW_LIMIT as u64 {
+        warnings.push(format!("CSV 共 {} 行，已截断至前 {} 行", total, CSV_ROW_LIMIT));
+    }
+    Ok((
+        PreviewContent::Table { columns: header, rows },
+        PreviewMetadata { line_count: Some(total), ..Default::default() },
+    ))
+}
+
+fn generate_content(
+    abs: &Path,
+    cat: &PreviewCategory,
+    mode: &PreviewMode,
+    size: Option<u64>,
+    warnings: &mut Vec<String>,
+) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
+    if matches!(mode, PreviewMode::Metadata) {
+        return Ok((PreviewContent::Fallback { message: "元数据模式".to_string() }, None));
+    }
+    match cat {
+        PreviewCategory::Text => {
+            let (text, meta) = read_text(abs, size, warnings)?;
+            Ok((PreviewContent::Text { text, language: Some("plaintext".to_string()) }, Some(meta)))
+        }
+        PreviewCategory::Code => {
+            let (text, meta) = read_text(abs, size, warnings)?;
+            Ok((PreviewContent::Text { text, language: language_hint(abs) }, Some(meta)))
+        }
+        PreviewCategory::Markdown => {
+            let (text, meta) = read_text(abs, size, warnings)?;
+            match mode {
+                PreviewMode::Raw => Ok((PreviewContent::Text { text, language: Some("markdown".to_string()) }, Some(meta))),
+                _ => Ok((PreviewContent::Markdown { markdown: text }, Some(meta))),
+            }
+        }
+        PreviewCategory::Html => {
+            let (text, meta) = read_text(abs, size, warnings)?;
+            match mode {
+                PreviewMode::Raw => Ok((PreviewContent::Text { text, language: Some("html".to_string()) }, Some(meta))),
+                _ => Ok((PreviewContent::Html { html: text, sandboxed: true }, Some(meta))),
+            }
+        }
+        PreviewCategory::Csv => {
+            match mode {
+                PreviewMode::Raw => {
+                    let (text, meta) = read_text(abs, size, warnings)?;
+                    Ok((PreviewContent::Text { text, language: Some("csv".to_string()) }, Some(meta)))
+                }
+                _ => {
+                    let (content, meta) = parse_csv(abs, size, warnings)?;
+                    Ok((content, Some(meta)))
+                }
+            }
+        }
+        PreviewCategory::Image | PreviewCategory::Audio | PreviewCategory::Video | PreviewCategory::Pdf => {
+            let url = abs.to_string_lossy().to_string();
+            let media_type = match cat {
+                PreviewCategory::Image => "image",
+                PreviewCategory::Audio => "audio",
+                PreviewCategory::Video => "video",
+                PreviewCategory::Pdf   => "pdf",
+                _ => "unknown",
+            }.to_string();
+            Ok((PreviewContent::Media { url, media_type }, None))
+        }
+        PreviewCategory::Spreadsheet => parse_xlsx(abs, warnings).map(|(c, m)| (c, Some(m))),
+        PreviewCategory::Document     => parse_docx(abs, warnings).map(|(c, m)| (c, m)),
+        PreviewCategory::Presentation => parse_pptx(abs, warnings).map(|(c, m)| (c, m)),
+        _ => {
+            Ok((PreviewContent::Fallback { message: "不支持预览此文件类型".to_string() }, None))
+        }
+    }
+}
+
+// ─── resolve_file_preview ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn resolve_file_preview(
+    path: String,
+    workspace_root: String,
+    mode: String,
+) -> Result<PreviewDescriptor, String> {
+    let abs = validate_path(&path, &workspace_root)?;
+    let meta = std::fs::metadata(&abs).map_err(|e| format!("读取文件元数据失败: {e}"))?;
+
+    let file_name = abs.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let extension = abs.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
+    let size_bytes = Some(meta.len());
+    let mime_type = detect_mime(&abs, extension.as_deref());
+    let category = classify_category(extension.as_deref(), &mime_type);
+    let (default_mode, available_modes) = default_modes(&category);
+    let caps = capabilities(&category);
+    let preview_mode = parse_mode(&mode);
+
+    let mut warnings = Vec::new();
+    let (content, file_meta) = generate_content(&abs, &category, &preview_mode, size_bytes, &mut warnings)?;
+
+    Ok(PreviewDescriptor {
+        path, file_name, extension, mime_type, size_bytes,
+        category, default_mode, available_modes, capabilities: caps,
+        content: Some(content), metadata: file_meta, warnings,
+    })
+}
+
+// ─── Office stubs (replaced in Task 8) ───────────────────────────────────────
+
+fn parse_xlsx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, PreviewMetadata), String> {
+    Ok((PreviewContent::Fallback { message: "XLSX 预览即将支持".to_string() }, PreviewMetadata::default()))
+}
+
+fn parse_docx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
+    Ok((PreviewContent::Fallback { message: "DOCX 预览即将支持".to_string() }, None))
+}
+
+fn parse_pptx(_path: &Path, _warnings: &mut Vec<String>) -> Result<(PreviewContent, Option<PreviewMetadata>), String> {
+    Ok((PreviewContent::Fallback { message: "PPTX 预览即将支持".to_string() }, None))
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -262,6 +440,47 @@ mod tests {
         let root = tmp_dir();
         let err = describe_file_preview("/etc/passwd".to_string(), root.to_string_lossy().to_string());
         assert!(err.is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_code_file_returns_text_content() {
+        let root = tmp_dir();
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        let result = resolve_file_preview("main.rs".to_string(), root.to_string_lossy().to_string(), "raw".to_string()).unwrap();
+        assert!(matches!(result.content, Some(PreviewContent::Text { .. })));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_markdown_structured_returns_markdown_content() {
+        let root = tmp_dir();
+        fs::write(root.join("README.md"), "# Hello\n\nWorld").unwrap();
+        let result = resolve_file_preview("README.md".to_string(), root.to_string_lossy().to_string(), "structured".to_string()).unwrap();
+        assert!(matches!(result.content, Some(PreviewContent::Markdown { .. })));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_csv_structured_returns_table() {
+        let root = tmp_dir();
+        fs::write(root.join("data.csv"), "name,age\nAlice,30\nBob,25").unwrap();
+        let result = resolve_file_preview("data.csv".to_string(), root.to_string_lossy().to_string(), "structured".to_string()).unwrap();
+        if let Some(PreviewContent::Table { columns, rows }) = result.content {
+            assert_eq!(columns, vec!["name", "age"]);
+            assert_eq!(rows.len(), 2);
+        } else {
+            panic!("expected Table content");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_html_rendered_returns_html_sandboxed() {
+        let root = tmp_dir();
+        fs::write(root.join("index.html"), "<h1>Hello</h1>").unwrap();
+        let result = resolve_file_preview("index.html".to_string(), root.to_string_lossy().to_string(), "rendered".to_string()).unwrap();
+        assert!(matches!(result.content, Some(PreviewContent::Html { sandboxed: true, .. })));
         fs::remove_dir_all(root).unwrap();
     }
 }
