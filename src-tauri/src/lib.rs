@@ -1,6 +1,7 @@
 mod agent;
 mod api;
 mod db;
+mod preview;
 mod session;
 
 use db::{ConversationRow, Database, MessageRow, ProjectRow};
