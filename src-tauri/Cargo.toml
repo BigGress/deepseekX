@@ -13,7 +13,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -26,3 +26,8 @@ uuid = { version = "1", features = ["v4"] }
 which = "7"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 toml = "0.8"
+infer = "0.15"
+mime_guess = "2.0"
+calamine = { version = "0.25", features = ["dates"] }
+zip = "2"
+sha2 = "0.10"
