@@ -183,6 +183,289 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "src/types.ts",
+      "accessCount": 19,
+      "lastAccessed": 1780138513266,
+      "type": "file"
+    },
+    {
+      "path": "src-tauri/src/preview.rs",
+      "accessCount": 18,
+      "lastAccessed": 1780138159651,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-05-30-file-preview-system.md",
+      "accessCount": 15,
+      "lastAccessed": 1780138466241,
+      "type": "file"
+    },
+    {
+      "path": "src/types.preview.test.ts",
+      "accessCount": 12,
+      "lastAccessed": 1780138131629,
+      "type": "file"
+    },
+    {
+      "path": "src/App.tsx",
+      "accessCount": 12,
+      "lastAccessed": 1780143829729,
+      "type": "file"
+    },
+    {
+      "path": "src/components/turn/ArtifactPanel.tsx",
+      "accessCount": 7,
+      "lastAccessed": 1780143773957,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FileTree.tsx",
+      "accessCount": 7,
+      "lastAccessed": 1780153993759,
+      "type": "file"
+    },
+    {
+      "path": "src/api.ts",
+      "accessCount": 6,
+      "lastAccessed": 1780131862235,
+      "type": "file"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "accessCount": 6,
+      "lastAccessed": 1780138167758,
+      "type": "file"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "accessCount": 4,
+      "lastAccessed": 1780132210327,
+      "type": "file"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "accessCount": 4,
+      "lastAccessed": 1780132212948,
+      "type": "file"
+    },
+    {
+      "path": "src/components/Sidebar.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1780139518326,
+      "type": "file"
+    },
+    {
+      "path": "src/components/turn/UserIntentCard.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1780143785340,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FilePreviewPanel.test.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1780152692053,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/HtmlPreview.test.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1780152692229,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-05-30-file-preview-design.md",
+      "accessCount": 3,
+      "lastAccessed": 1780121342835,
+      "type": "file"
+    },
+    {
+      "path": "src/api.preview.test.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780131862183,
+      "type": "file"
+    },
+    {
+      "path": "src/hooks/useFilePreview.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780131992948,
+      "type": "file"
+    },
+    {
+      "path": "src/hooks/useFilePreview.test.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780131993136,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/PreviewModeTabs.test.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780138558849,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FocusedPreviewOverlay.test.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780139218730,
+      "type": "file"
+    },
+    {
+      "path": "src/components/TurnItem.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780143794540,
+      "type": "file"
+    },
+    {
+      "path": "src/components/TurnList.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780143800885,
+      "type": "file"
+    },
+    {
+      "path": "src/components/MessageList.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780143809822,
+      "type": "file"
+    },
+    {
+      "path": "src/components/ChatPanel.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1780143821380,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/TextPreview.test.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138262722,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/MarkdownPreview.test.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138265364,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/MediaPreview.test.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138364692,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/TablePreview.test.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138368336,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/PreviewModeTabs.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138519052,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/PreviewRenderer.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138521059,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/FallbackPreview.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780138527906,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FileTree.preview.test.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780139312696,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-05-30-tool-process-visibility-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1780120988892,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-05-29-chat-result-presentation-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1780120989249,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 1,
+      "lastAccessed": 1780121524251,
+      "type": "file"
+    },
+    {
+      "path": "src/test/setup.ts",
+      "accessCount": 1,
+      "lastAccessed": 1780121528161,
+      "type": "file"
+    },
+    {
+      "path": "src/components/TurnItem.test.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780121529113,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/FallbackPreview.test.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138230438,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/TextPreview.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138252305,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/MarkdownPreview.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138256232,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/MediaPreview.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138348589,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/TablePreview.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138353365,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/HtmlPreview.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138356798,
+      "type": "file"
+    },
+    {
+      "path": "src/components/preview/PreviewRenderer.test.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138428445,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FocusedPreviewOverlay.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138541654,
+      "type": "file"
+    },
+    {
+      "path": "src/components/FilePreviewPanel.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780138552970,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }

@@ -40,7 +40,7 @@ describe("Preview type definitions", () => {
       assertType<string[][]>(c.rows);
     }
     if (c.kind === "media") {
-      assertType<"image" | "audio" | "video" | "pdf">(c.mediaType);
+      assertType<"image" | "audio" | "video" | "pdf">(c.media_type);
     }
   });
 });

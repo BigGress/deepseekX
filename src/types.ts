@@ -248,8 +248,8 @@ export type PreviewContent =
   | { kind: "markdown"; markdown: string }
   | { kind: "html"; html: string; sandboxed: boolean }
   | { kind: "table"; columns: string[]; rows: string[][] }
-  | { kind: "media"; url: string; mediaType: "image" | "audio" | "video" | "pdf" }
-  | { kind: "pages"; pages: Array<{ page: number; imageUrl: string }> }
+  | { kind: "media"; url: string; media_type: "image" | "audio" | "video" | "pdf" }
+  | { kind: "pages"; pages: Array<{ page: number; image_url: string }> }
   | { kind: "fallback"; message: string };
 
 export interface PreviewMetadata {

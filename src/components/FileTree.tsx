@@ -39,7 +39,6 @@ interface TreeNodeProps {
 
 function TreeNode({ node, depth, onSelectFile, onPreviewFile, previewPath }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
-  const [hovered, setHovered] = useState(false);
 
   if (node.is_directory) {
     const hasChildren = node.children && node.children.length > 0;
@@ -92,11 +91,9 @@ function TreeNode({ node, depth, onSelectFile, onPreviewFile, previewPath }: Tre
   return (
     <div
       data-path={node.path}
-      onClick={() => onSelectFile?.(node.path)}
+      onClick={() => { onPreviewFile?.(node.path); onSelectFile?.(node.path); }}
       onDoubleClick={() => onPreviewFile?.(node.path)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className={`flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-neutral-850 transition-colors select-none group ${
+      className={`flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-neutral-850 transition-colors select-none ${
         isActive ? "text-blue-400" : "text-neutral-500 hover:text-neutral-300"
       }`}
       style={{ paddingLeft: `${12 + depth * 14}px` }}
@@ -109,21 +106,6 @@ function TreeNode({ node, depth, onSelectFile, onPreviewFile, previewPath }: Tre
         <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4z" />
       </svg>
       <span className="truncate flex-1">{node.name}</span>
-      {(hovered || isActive) && onPreviewFile && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onPreviewFile(node.path); }}
-          className="text-neutral-500 hover:text-blue-400 transition-colors shrink-0"
-          title="预览文件"
-          aria-label="预览文件"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-        </button>
-      )}
     </div>
   );
 }

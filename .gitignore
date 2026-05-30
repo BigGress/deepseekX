@@ -26,3 +26,5 @@ src-tauri/icons/*.png
 src-tauri/icons/*.icns
 src-tauri/icons/*.ico
 !src-tauri/icons/default-icon.png
+.omc
+superpowers
