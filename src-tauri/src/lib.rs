@@ -1649,6 +1649,9 @@ pub fn run() {
             // File
             list_files,
             read_file_content,
+            // Preview
+            preview::describe_file_preview,
+            preview::resolve_file_preview,
             // Settings
             get_setting,
             set_setting,
