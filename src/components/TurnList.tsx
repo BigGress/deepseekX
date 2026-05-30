@@ -5,9 +5,10 @@ interface TurnListProps {
   turns: Turn[];
   isLoading: boolean;
   onAgentFollowUp?: (turn: Turn, action: AgentFollowUpAction) => void;
+  onPreviewFile?: (path: string) => void;
 }
 
-export default function TurnList({ turns, isLoading, onAgentFollowUp }: TurnListProps) {
+export default function TurnList({ turns, isLoading, onAgentFollowUp, onPreviewFile }: TurnListProps) {
   if (turns.length === 0) {
     return null;
   }
@@ -21,6 +22,7 @@ export default function TurnList({ turns, isLoading, onAgentFollowUp }: TurnList
           isLatest={index === turns.length - 1}
           isLoading={isLoading}
           onAgentFollowUp={onAgentFollowUp}
+          onPreviewFile={onPreviewFile}
         />
       ))}
     </div>

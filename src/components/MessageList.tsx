@@ -7,6 +7,7 @@ interface MessageListProps {
   turns?: Turn[];
   isLoading: boolean;
   onAgentFollowUp?: (turn: Turn, action: AgentFollowUpAction) => void;
+  onPreviewFile?: (path: string) => void;
 }
 
 export default function MessageList({
@@ -14,6 +15,7 @@ export default function MessageList({
   turns,
   isLoading,
   onAgentFollowUp,
+  onPreviewFile,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -56,6 +58,7 @@ export default function MessageList({
           turns={normalizedTurns}
           isLoading={isLoading}
           onAgentFollowUp={onAgentFollowUp}
+          onPreviewFile={onPreviewFile}
         />
         <div ref={bottomRef} />
       </div>

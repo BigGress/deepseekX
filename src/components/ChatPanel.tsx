@@ -23,6 +23,7 @@ interface ChatPanelProps {
   mcpNames?: string[];
   debugLlmResponsesEnabled?: boolean;
   llmDebugEntries?: LlmRequestLogEntry[];
+  onPreviewFile?: (path: string) => void;
 }
 
 export default function ChatPanel({
@@ -35,6 +36,7 @@ export default function ChatPanel({
   mcpNames,
   debugLlmResponsesEnabled = false,
   llmDebugEntries = [],
+  onPreviewFile,
 }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState("");
   const [composeMode, setComposeMode] = useState<ComposeMode>("agent");
@@ -95,6 +97,7 @@ export default function ChatPanel({
         turns={conversation?.turns}
         isLoading={isLoading}
         onAgentFollowUp={onAgentFollowUp}
+        onPreviewFile={onPreviewFile}
       />
 
       {debugLlmResponsesEnabled ? <LlmDebugPanel entries={llmDebugEntries} /> : null}

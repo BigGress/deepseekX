@@ -4,9 +4,10 @@ import { attachmentLabel } from "./turnPresentation";
 interface UserIntentCardProps {
   userInput: string;
   attachments?: RequestAttachment[] | null;
+  onPreviewFile?: (path: string) => void;
 }
 
-export default function UserIntentCard({ userInput, attachments }: UserIntentCardProps) {
+export default function UserIntentCard({ userInput, attachments, onPreviewFile }: UserIntentCardProps) {
   const visibleAttachments = attachments ?? [];
 
   return (
@@ -26,9 +27,17 @@ export default function UserIntentCard({ userInput, attachments }: UserIntentCar
               {visibleAttachments.map((attachment) => (
                 <span
                   key={`${attachment.kind}-${attachment.name}`}
-                  className="rounded-full border border-neutral-700 bg-neutral-950 px-2.5 py-1 text-[11px] text-neutral-300"
+                  className="rounded-full border border-neutral-700 bg-neutral-950 px-2.5 py-1 text-[11px] text-neutral-300 flex items-center gap-1"
                 >
                   {attachmentLabel(attachment)}
+                  {attachment.kind === "file" && onPreviewFile && (
+                    <button
+                      onClick={() => onPreviewFile(attachment.name)}
+                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors ml-1"
+                    >
+                      预览
+                    </button>
+                  )}
                 </span>
               ))}
             </div>

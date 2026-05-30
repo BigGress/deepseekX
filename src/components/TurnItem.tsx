@@ -11,6 +11,7 @@ interface TurnItemProps {
   isLatest?: boolean;
   isLoading?: boolean;
   onAgentFollowUp?: (turn: Turn, action: AgentFollowUpAction) => void;
+  onPreviewFile?: (path: string) => void;
 }
 
 export default function TurnItem({
@@ -18,10 +19,11 @@ export default function TurnItem({
   isLatest = false,
   isLoading = false,
   onAgentFollowUp,
+  onPreviewFile,
 }: TurnItemProps) {
   return (
     <article className="space-y-3">
-      <UserIntentCard userInput={turn.user_input} attachments={turn.request_attachments} />
+      <UserIntentCard userInput={turn.user_input} attachments={turn.request_attachments} onPreviewFile={onPreviewFile} />
       <ResultCardGroup turn={turn} />
       <StatusPanel
         turn={turn}
@@ -34,7 +36,7 @@ export default function TurnItem({
         agentSteps={turn.agent_steps}
         defaultExpanded={shouldExpandExecutionByDefault(turn)}
       />
-      <ArtifactPanel agentSteps={turn.agent_steps} />
+      <ArtifactPanel agentSteps={turn.agent_steps} onPreviewFile={onPreviewFile} />
     </article>
   );
 }

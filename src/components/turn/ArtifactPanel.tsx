@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { AgentStep, FileOperation } from "../../types";
 import { hasArtifacts } from "./turnPresentation";
 
-export default function ArtifactPanel({ agentSteps }: { agentSteps?: AgentStep[] | null }) {
+export default function ArtifactPanel({ agentSteps, onPreviewFile }: { agentSteps?: AgentStep[] | null; onPreviewFile?: (path: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const artifactSteps = useMemo(() => (agentSteps ?? []).filter(hasArtifacts), [agentSteps]);
 
@@ -30,7 +30,7 @@ export default function ArtifactPanel({ agentSteps }: { agentSteps?: AgentStep[]
         {expanded && (
           <div className="mt-4 space-y-3">
             {artifactSteps.map((step, index) => (
-              <CodeArtifactCard key={`${step.action_name}-${index}`} step={step} />
+              <CodeArtifactCard key={`${step.action_name}-${index}`} step={step} onPreviewFile={onPreviewFile} />
             ))}
           </div>
         )}
@@ -39,7 +39,7 @@ export default function ArtifactPanel({ agentSteps }: { agentSteps?: AgentStep[]
   );
 }
 
-function CodeArtifactCard({ step }: { step: AgentStep }) {
+function CodeArtifactCard({ step, onPreviewFile }: { step: AgentStep; onPreviewFile?: (path: string) => void }) {
   return (
     <article className="rounded-xl border border-neutral-800 bg-neutral-950/80 px-3 py-3">
       <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
@@ -61,7 +61,7 @@ function CodeArtifactCard({ step }: { step: AgentStep }) {
         <div className="mt-3 space-y-1">
           <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">文件操作</p>
           {step.file_operations.map((operation, index) => (
-            <FileOperationItem key={`${operation.path}-${operation.operation}-${index}`} operation={operation} />
+            <FileOperationItem key={`${operation.path}-${operation.operation}-${index}`} operation={operation} onPreviewFile={onPreviewFile} />
           ))}
         </div>
       )}
@@ -80,7 +80,7 @@ function PreviewBlock({ title, content }: { title: string; content: string }) {
   );
 }
 
-function FileOperationItem({ operation }: { operation: FileOperation }) {
+function FileOperationItem({ operation, onPreviewFile }: { operation: FileOperation; onPreviewFile?: (path: string) => void }) {
   const target = operation.target_path ? ` -> ${operation.target_path}` : "";
   const ranges =
     operation.changed_ranges && operation.changed_ranges.length > 0
@@ -88,10 +88,19 @@ function FileOperationItem({ operation }: { operation: FileOperation }) {
       : "";
 
   return (
-    <p className="text-[11px] text-neutral-300">
+    <p className="text-[11px] text-neutral-300 flex items-center gap-1">
       {operation.operation}: {operation.path}
       {target}
       {ranges}
+      {onPreviewFile && (
+        <button
+          onClick={() => onPreviewFile(operation.path)}
+          className="text-xs text-blue-400 hover:text-blue-300 transition-colors ml-1"
+          title="预览文件"
+        >
+          预览
+        </button>
+      )}
     </p>
   );
 }

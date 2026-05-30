@@ -621,6 +621,7 @@ function App() {
           mcpNames={mcpNamesFromProject}
           debugLlmResponsesEnabled={debugLlmResponses}
           llmDebugEntries={llmDebugEntries}
+          onPreviewFile={handlePreviewFile}
         />
         {previewState.isOpen && (
           <FilePreviewPanel
