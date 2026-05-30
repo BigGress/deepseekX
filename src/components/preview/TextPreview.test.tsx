@@ -1,6 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { cleanup, afterEach } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import TextPreview from "./TextPreview";
 
 afterEach(cleanup);
