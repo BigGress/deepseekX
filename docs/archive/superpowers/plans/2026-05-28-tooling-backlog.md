@@ -1,5 +1,7 @@
 # Tooling Backlog
 
+> Status: Archived
+
 Standalone backlog for missing runtime tools and capability gaps in DeepSeekX. This file is intentionally separate from historical implementation plans.
 
 ## Tool Runtime

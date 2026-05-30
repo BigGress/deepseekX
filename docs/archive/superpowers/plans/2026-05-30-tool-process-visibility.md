@@ -1,5 +1,7 @@
 # Tool Process Visibility Implementation Plan
 
+**Status:** Archived
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make tool and execution-process content secondary in the chat window by keeping successful execution detail collapsed by default and rendering `summarize_findings` as a one-line summary with an expandable full body that excludes raw retrieval hit dumps.

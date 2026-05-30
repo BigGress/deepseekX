@@ -329,7 +329,8 @@ fn normalize_summary_format_field(
             }
             "bullet" | "bullets" | "bullet_list" => "bullet_report",
             "changes" | "change_report" | "diff_summary" => "change_summary",
-            other => other,
+            other if is_known_summary_format(other) => other,
+            _ => infer_summary_format(value),
         };
         object.insert(
             field.into(),
@@ -372,6 +373,43 @@ fn normalize_optional_string_list_field(
             object.remove(field);
         }
         _ => {}
+    }
+}
+
+fn is_known_summary_format(value: &str) -> bool {
+    matches!(value, "bullet_report" | "change_summary" | "research_brief")
+}
+
+fn infer_summary_format(text: &str) -> &'static str {
+    let normalized = text.to_lowercase();
+    if normalized.contains("变更")
+        || normalized.contains("diff")
+        || normalized.contains("patch")
+        || normalized.contains("修改")
+        || normalized.contains("change")
+    {
+        "change_summary"
+    } else if normalized.contains("结构化")
+        || normalized.contains("汇报")
+        || normalized.contains("报告")
+        || normalized.contains("research")
+        || normalized.contains("brief")
+        || normalized.contains("业务概述")
+        || normalized.contains("盈利模式")
+        || normalized.contains("路线图")
+    {
+        "research_brief"
+    } else if normalized.contains("bullet")
+        || normalized.contains("bullets")
+        || normalized.contains("list")
+        || normalized.contains("列表")
+        || normalized.contains("要点")
+        || normalized.contains("分点")
+        || normalized.contains("条目")
+    {
+        "bullet_report"
+    } else {
+        "research_brief"
     }
 }
 
@@ -789,6 +827,60 @@ mod tests {
         match parsed {
             AgentAction::SummarizeFindings { output_format, .. } => {
                 assert_eq!(format!("{:?}", output_format), "ResearchBrief");
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_summarize_findings_with_chinese_descriptive_output_format() {
+        let raw = r#"{
+            "action": "summarize_findings",
+            "reason": "整理竞争对手调研",
+            "focus": "Snowflake 竞争对手对比",
+            "output_format": "结构化汇报，包含：业务概述、盈利模式、关键技术要点、创业路线图建议"
+        }"#;
+
+        let parsed = parse_planner_action(raw).unwrap();
+        match parsed {
+            AgentAction::SummarizeFindings { output_format, .. } => {
+                assert_eq!(format!("{:?}", output_format), "ResearchBrief");
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_summarize_findings_with_chinese_bullet_output_format() {
+        let raw = r#"{
+            "action": "summarize_findings",
+            "reason": "整理执行结果",
+            "focus": "本轮执行要点",
+            "output_format": "分点列出关键要点和结论"
+        }"#;
+
+        let parsed = parse_planner_action(raw).unwrap();
+        match parsed {
+            AgentAction::SummarizeFindings { output_format, .. } => {
+                assert_eq!(format!("{:?}", output_format), "BulletReport");
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_summarize_findings_with_change_description_output_format() {
+        let raw = r#"{
+            "action": "summarize_findings",
+            "reason": "整理代码修改",
+            "focus": "补丁改动总结",
+            "output_format": "按变更说明总结这次修改"
+        }"#;
+
+        let parsed = parse_planner_action(raw).unwrap();
+        match parsed {
+            AgentAction::SummarizeFindings { output_format, .. } => {
+                assert_eq!(format!("{:?}", output_format), "ChangeSummary");
             }
             other => panic!("unexpected action: {:?}", other),
         }

@@ -1,6 +1,6 @@
 # Agent Session State Machine Phase 1 Implementation Plan
 
-> 状态：Implemented（代码与验证已完成；未执行 git checkpoint 步骤）
+> 状态：Archived（原计划目标已实现；文档已归档）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

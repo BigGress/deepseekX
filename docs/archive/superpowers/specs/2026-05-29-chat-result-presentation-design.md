@@ -1,7 +1,7 @@
 # DeepSeekX 聊天结果区展示模型设计
 
 > 日期：2026-05-29
-> 状态：Implemented
+> 状态：Archived
 > 主题：统一 Chat / Agent 结果展示模型
 
 ---

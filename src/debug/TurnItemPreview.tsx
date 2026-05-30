@@ -13,7 +13,15 @@ const MOCK_SUCCESS_SUMMARY_TURN: Turn = {
 
 > 如果你看重中长期数据平台渗透率，可以把它当作成长标的观察名单。
 
-建议重点看 \`product revenue growth\` 和 \`net revenue retention\`。`,
+建议重点看 \`product revenue growth\` 和 \`net revenue retention\`。
+
+| 指标 | 当前观察 |
+| --- | --- |
+| 收入增速 | 需要重新抬升 |
+| 估值弹性 | 对财报较敏感 |
+
+- [x] 已完成基础业务调研
+- [ ] 待补充最新财报电话会纪要`,
   agent_goal_status: "done",
   duration_ms: 2140,
   retry_count: 0,
