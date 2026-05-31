@@ -52,7 +52,7 @@ describe("FilePreviewPanel", () => {
   });
 
   it("renders content when descriptor is loaded", () => {
-    render(<FilePreviewPanel state={makeState()} workspaceRoot="/ws" onClose={() => {}} onSwitchMode={() => Promise.resolve()} onOpenFocused={() => {}} />);
-    expect(screen.getByText("fn main() {}")).toBeInTheDocument();
+    const { container } = render(<FilePreviewPanel state={makeState()} workspaceRoot="/ws" onClose={() => {}} onSwitchMode={() => Promise.resolve()} onOpenFocused={() => {}} />);
+    expect(container.querySelector("code")?.textContent).toContain("fn main() {}");
   });
 });

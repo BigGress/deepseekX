@@ -19,7 +19,7 @@ export default function FilePreviewPanel({
   const fileName = descriptor?.file_name ?? target?.title ?? target?.path.split("/").pop() ?? "文件预览";
 
   return (
-    <div className="flex flex-col w-80 min-w-[280px] max-w-[480px] border-l border-neutral-800 bg-neutral-950 shrink-0 h-full overflow-hidden">
+    <div className="flex flex-col w-full bg-neutral-950 h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-800 shrink-0">
         <span className="flex-1 text-xs text-neutral-200 font-medium truncate" title={target?.path}>
