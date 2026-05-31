@@ -130,7 +130,6 @@ function App() {
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "main-layout",
-    panelIds: ["chat", "preview"],
     storage: localStorage,
   });
 
