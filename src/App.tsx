@@ -640,7 +640,7 @@ function App() {
         </Panel>
         {previewState.isOpen && (
           <>
-            <Separator>
+            <Separator id="chat-preview-separator">
               <ResizeHandle />
             </Separator>
             <Panel id="preview" defaultSize={40} minSize={20}>

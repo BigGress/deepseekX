@@ -182,7 +182,7 @@ git commit -m "refactor: remove fixed width from FilePreviewPanel for resizable 
 在 `src/App.tsx` 顶部现有 import 列表末尾（第 39 行之后）添加：
 
 ```tsx
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import ResizeHandle from "./components/ResizeHandle";
 ```
 
@@ -219,9 +219,10 @@ import ResizeHandle from "./components/ResizeHandle";
 替换为：
 
 ```tsx
-      <PanelGroup
-        direction="horizontal"
-        autoSaveId="main-layout"
+      <Group
+        orientation="horizontal"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
         className="flex-1 overflow-hidden"
       >
         <Panel defaultSize={60} minSize={25}>
@@ -240,9 +241,9 @@ import ResizeHandle from "./components/ResizeHandle";
         </Panel>
         {previewState.isOpen && (
           <>
-            <PanelResizeHandle>
+            <Separator id="chat-preview-separator">
               <ResizeHandle />
-            </PanelResizeHandle>
+            </Separator>
             <Panel defaultSize={40} minSize={20}>
               <FilePreviewPanel
                 state={previewState}
@@ -254,7 +255,7 @@ import ResizeHandle from "./components/ResizeHandle";
             </Panel>
           </>
         )}
-      </PanelGroup>
+      </Group>
 ```
 
 - [ ] **Step 3: 运行全量测试，确认无回归**
