@@ -37,6 +37,8 @@ import {
 import { useFilePreview } from "./hooks/useFilePreview";
 import FilePreviewPanel from "./components/FilePreviewPanel";
 import FocusedPreviewOverlay from "./components/FocusedPreviewOverlay";
+import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import ResizeHandle from "./components/ResizeHandle";
 
 // 从 ContentBlock 数组中提取纯文本
 function extractText(content: ContentBlock[] | string): string {
@@ -125,6 +127,12 @@ function App() {
     openFocused,
     closeFocused,
   } = useFilePreview();
+
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "main-layout",
+    panelIds: ["chat", "preview"],
+    storage: localStorage,
+  });
 
   const handlePreviewFile = useCallback((path: string) => {
     const target: PreviewTarget = { path, source: "file_tree" };
@@ -610,29 +618,43 @@ function App() {
         onPreviewFile={handlePreviewFile}
         previewPath={previewState.target?.path}
       />
-      <div className="flex-1 flex overflow-hidden">
-        <ChatPanel
-          conversation={activeConversation ?? null}
-          isLoading={isLoading}
-          onSend={handleSend}
-          onAgentFollowUp={handleAgentFollowUp}
-          fileNodes={fileNodes}
-          skillNames={skillNamesFromProject}
-          mcpNames={mcpNamesFromProject}
-          debugLlmResponsesEnabled={debugLlmResponses}
-          llmDebugEntries={llmDebugEntries}
-          onPreviewFile={handlePreviewFile}
-        />
-        {previewState.isOpen && (
-          <FilePreviewPanel
-            state={previewState}
-            workspaceRoot={selectedProject?.root_path ?? ""}
-            onClose={closePreview}
-            onSwitchMode={switchPreviewMode}
-            onOpenFocused={openFocused}
+      <Group
+        orientation="horizontal"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
+        className="flex-1 overflow-hidden"
+      >
+        <Panel id="chat" defaultSize={60} minSize={25}>
+          <ChatPanel
+            conversation={activeConversation ?? null}
+            isLoading={isLoading}
+            onSend={handleSend}
+            onAgentFollowUp={handleAgentFollowUp}
+            fileNodes={fileNodes}
+            skillNames={skillNamesFromProject}
+            mcpNames={mcpNamesFromProject}
+            debugLlmResponsesEnabled={debugLlmResponses}
+            llmDebugEntries={llmDebugEntries}
+            onPreviewFile={handlePreviewFile}
           />
+        </Panel>
+        {previewState.isOpen && (
+          <>
+            <Separator>
+              <ResizeHandle />
+            </Separator>
+            <Panel id="preview" defaultSize={40} minSize={20}>
+              <FilePreviewPanel
+                state={previewState}
+                workspaceRoot={selectedProject?.root_path ?? ""}
+                onClose={closePreview}
+                onSwitchMode={switchPreviewMode}
+                onOpenFocused={openFocused}
+              />
+            </Panel>
+          </>
         )}
-      </div>
+      </Group>
       <ProjectSettings
         open={settingsOpen}
         project={selectedProject}
