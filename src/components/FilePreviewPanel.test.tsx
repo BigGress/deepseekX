@@ -53,6 +53,8 @@ describe("FilePreviewPanel", () => {
 
   it("renders content when descriptor is loaded", () => {
     const { container } = render(<FilePreviewPanel state={makeState()} workspaceRoot="/ws" onClose={() => {}} onSwitchMode={() => Promise.resolve()} onOpenFocused={() => {}} />);
-    expect(container.querySelector("code")?.textContent).toContain("fn main() {}");
+    const codeEl = container.querySelector("code");
+    expect(codeEl).not.toBeNull();
+    expect(codeEl!.textContent).toContain("fn main() {}");
   });
 });
