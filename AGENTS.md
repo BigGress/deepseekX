@@ -56,3 +56,5 @@ Do not claim a fix is complete unless the relevant verification actually passed.
 - If you are touching user interaction, inspect the current UI before changing copy or layout assumptions.
 - If you are touching planner, permissions, retrieval, or executor logic, capture the raw runtime evidence first.
 - If a change belongs to both human workflow and agent runtime behavior, update both the development docs and the agent docs in the same change.
+
+@RTK.md
